@@ -1,29 +1,27 @@
 {
-    "name": "autoteile-crm",
-    "version": "1.0.0",
-    "description": "CRM System for AutoTeile WAWI with SQLite database",
-    "main": "database.ts",
-    "scripts": {
-        "init-db": "ts-node scripts/initDatabase.ts",
-        "generate-demo-data": "ts-node scripts/generateDemoData.ts",
-        "setup-auth": "ts-node scripts/setupAuth.ts",
-        "test:db": "ts-node scripts/testDatabase.ts"
-    },
-    "keywords": [
-        "crm",
-        "sqlite",
-        "database",
-        "autoteile",
-        "wawi"
-    ],
-    "author": "Nyrox Systems",
-    "license": "PROPRIETARY",
-    "dependencies": {
-        "sqlite3": "^5.1.7"
-    },
-    "devDependencies": {
-        "@types/node": "^20.12.7",
-        "ts-node": "^10.9.2",
-        "typescript": "^5.4.5"
-    }
+  "name": "dashboard",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.22.3",
+    "recharts": "^2.12.7"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "playwright": "^1.57.0",
+    "typescript": "^5.4.3",
+    "vite": "^5.2.0"
+  }
 }
