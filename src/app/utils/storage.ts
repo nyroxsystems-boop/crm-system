@@ -210,7 +210,7 @@ export function isLoggedIn(): boolean {
 
 // In production, this should be the URL of your Bot Service
 // e.g. "https://autoteile-bot-service.onrender.com"
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://autoteile-bot.onrender.com';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://autoteile-bot-service.onrender.com';
 
 export async function getLeads(): Promise<Lead[]> {
   try {
