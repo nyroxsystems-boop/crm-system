@@ -247,6 +247,17 @@ export async function saveLead(lead: Partial<Lead>): Promise<void> {
   }
 }
 
+export async function deleteLead(id: string): Promise<void> {
+  try {
+    await fetch(`${API_BASE_URL}/api/crm/leads/${id}`, {
+      method: 'DELETE',
+    });
+  } catch (error) {
+    console.error('Error deleting lead:', error);
+    throw error;
+  }
+}
+
 // ... Keep other LocalStorage functions (Users, Settings) as they are for now?
 // Actually, user wants "CRM Data" persisted. Users/Settings might be fine local for now?
 // Let's stick to LEADS for the main InvenTree integration.

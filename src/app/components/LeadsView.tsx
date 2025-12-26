@@ -24,21 +24,22 @@ export function LeadsView() {
     loadLeads();
   }, []);
 
-  const loadLeads = () => {
-    setLeads(getLeads());
+  const loadLeads = async () => {
+    const data = await getLeads();
+    setLeads(data);
   };
 
-  const handleSaveLead = (lead: Partial<Lead>) => {
-    saveLead(lead);
-    loadLeads();
+  const handleSaveLead = async (lead: Partial<Lead>) => {
+    await saveLead(lead);
+    await loadLeads();
     setIsModalOpen(false);
     setEditingLead(null);
   };
 
-  const handleDeleteLead = (id: string) => {
+  const handleDeleteLead = async (id: string) => {
     if (confirm('Möchten Sie diesen Lead wirklich löschen?')) {
-      deleteLead(id);
-      loadLeads();
+      await deleteLead(id);
+      await loadLeads();
       setOpenMenuId(null);
     }
   };
@@ -64,21 +65,21 @@ export function LeadsView() {
 
   const filteredLeads = leads
     .filter((lead) => {
-      const matchesSearch = 
+      const matchesSearch =
         lead.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
         lead.contactPerson.toLowerCase().includes(searchTerm.toLowerCase()) ||
         lead.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (lead.phone && lead.phone.toLowerCase().includes(searchTerm.toLowerCase()));
-      
+
       const matchesStatus = statusFilter === 'all' || lead.status === statusFilter;
       const matchesPriority = priorityFilter === 'all' || lead.priority === priorityFilter;
       const matchesAssignedTo = assignedToFilter === 'all' || lead.assignedTo === assignedToFilter;
-      
+
       return matchesSearch && matchesStatus && matchesPriority && matchesAssignedTo;
     })
     .sort((a, b) => {
       let comparison = 0;
-      
+
       if (sortField === 'company') {
         comparison = a.company.localeCompare(b.company);
       } else if (sortField === 'createdAt') {
@@ -88,7 +89,7 @@ export function LeadsView() {
       } else if (sortField === 'value') {
         comparison = (a.value || 0) - (b.value || 0);
       }
-      
+
       return sortDirection === 'asc' ? comparison : -comparison;
     });
 
@@ -96,7 +97,7 @@ export function LeadsView() {
     const now = new Date();
     const then = new Date(date);
     const seconds = Math.floor((now.getTime() - then.getTime()) / 1000);
-    
+
     if (seconds < 60) return 'Gerade eben';
     if (seconds < 3600) return `vor ${Math.floor(seconds / 60)}m`;
     if (seconds < 86400) return `vor ${Math.floor(seconds / 3600)}h`;
@@ -241,8 +242,8 @@ export function LeadsView() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredLeads.map((lead) => (
-                <tr 
-                  key={lead.id} 
+                <tr
+                  key={lead.id}
                   onClick={() => setDetailLead(lead)}
                   className="hover:bg-purple-50/50 transition-colors cursor-pointer"
                 >
@@ -339,7 +340,7 @@ export function LeadsView() {
                 <p className="text-xs text-gray-400 truncate mt-1">{lead.email}</p>
               </div>
             </div>
-            
+
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${statusColors[lead.status]}`}>
                 {lead.status}
@@ -379,7 +380,7 @@ export function LeadsView() {
             </div>
           </div>
         ))}
-        
+
         {filteredLeads.length === 0 && (
           <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-200">
             <Search className="w-12 h-12 mx-auto mb-3 text-gray-300" />
