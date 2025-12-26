@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: crm-system
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://autoteile-bot-service.onrender.com
+      - key: VITE_WAWI_API_TOKEN
+        value: d6d67b775fe3abba8733a07f4256ec7fe843de0028ed0b50
+      - key: VITE_WAWI_SERVICE_TOKEN
+        value: 69724646e47a9a1e5b9868f72f73d4a4643534ef18206e82
