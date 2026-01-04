@@ -29,18 +29,23 @@ export function PipelineView() {
     loadData();
   }, []);
 
-  const loadData = () => {
-    const allLeads = getLeads();
-    const settings = getSettings();
-    const activeStages = settings.pipelineStages
-      .filter(s => s.isActive)
-      .sort((a, b) => a.order - b.order);
-    
-    setLeads(allLeads);
-    setStages(activeStages);
-    
-    if (activeStages.length > 0 && !activeStageId) {
-      setActiveStageId(activeStages[0].id);
+  const loadData = async () => {
+    try {
+      const allLeads = await getLeads();
+      const settings = getSettings();
+      const activeStages = settings.pipelineStages
+        .filter(s => s.isActive)
+        .sort((a, b) => a.order - b.order);
+
+      setLeads(Array.isArray(allLeads) ? allLeads : []);
+      setStages(activeStages);
+
+      if (activeStages.length > 0 && !activeStageId) {
+        setActiveStageId(activeStages[0].id);
+      }
+    } catch (error) {
+      console.error('Failed to load pipeline data:', error);
+      setLeads([]);
     }
   };
 
@@ -100,16 +105,15 @@ export function PipelineView() {
             const stageLeadsCount = leads.filter(l => l.status === stage.name).length;
             const stageValue = leads.filter(l => l.status === stage.name).reduce((sum, l) => sum + (l.value || 0), 0);
             const isActive = activeStageId === stage.id;
-            
+
             return (
               <button
                 key={stage.id}
                 onClick={() => setActiveStageId(stage.id)}
-                className={`relative flex-1 min-w-[140px] md:min-w-[180px] px-4 py-4 border-b-4 transition-all ${
-                  isActive 
-                    ? `${colors.border} ${colors.bg}` 
-                    : 'border-transparent hover:bg-gray-50'
-                }`}
+                className={`relative flex-1 min-w-[140px] md:min-w-[180px] px-4 py-4 border-b-4 transition-all ${isActive
+                  ? `${colors.border} ${colors.bg}`
+                  : 'border-transparent hover:bg-gray-50'
+                  }`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <span className={`text-xs font-bold uppercase tracking-wide ${isActive ? colors.text : 'text-gray-500'}`}>
@@ -317,8 +321,8 @@ export function PipelineView() {
             setDetailLead(null);
             handleEditClick(lead);
           }}
-          onDelete={(id) => {
-            handleDeleteLead(id);
+          onDelete={() => {
+            handleDeleteLead(detailLead.id);
             setDetailLead(null);
           }}
         />

@@ -7,7 +7,16 @@ export function Dashboard() {
   const [leads, setLeads] = useState<Lead[]>([]);
 
   useEffect(() => {
-    setLeads(getLeads());
+    async function loadLeads() {
+      try {
+        const data = await getLeads();
+        setLeads(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error('Failed to load leads:', error);
+        setLeads([]);
+      }
+    }
+    loadLeads();
   }, []);
 
   const stats = {
@@ -119,9 +128,9 @@ export function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
               <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 12 }} />
               <YAxis tick={{ fill: '#64748b', fontSize: 12 }} />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#ffffff', 
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#ffffff',
                   border: '1px solid #e2e8f0',
                   borderRadius: '12px',
                   padding: '12px',
@@ -131,8 +140,8 @@ export function Dashboard() {
               <Bar dataKey="count" fill="url(#colorGradient)" radius={[8, 8, 0, 0]} />
               <defs>
                 <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#7c3aed" stopOpacity={1}/>
-                  <stop offset="100%" stopColor="#a78bfa" stopOpacity={1}/>
+                  <stop offset="0%" stopColor="#7c3aed" stopOpacity={1} />
+                  <stop offset="100%" stopColor="#a78bfa" stopOpacity={1} />
                 </linearGradient>
               </defs>
             </BarChart>
@@ -162,9 +171,9 @@ export function Dashboard() {
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#ffffff', 
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#ffffff',
                     border: '1px solid #e2e8f0',
                     borderRadius: '12px',
                     padding: '12px',
@@ -204,12 +213,11 @@ export function Dashboard() {
                   <p className="text-sm text-gray-500">{lead.contactPerson}</p>
                 </div>
                 <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 md:gap-3">
-                  <span className={`text-xs px-3 py-1.5 rounded-lg font-semibold shadow-sm ${
-                    lead.status === 'Neu' ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white' :
-                    lead.status === 'Qualifiziert' ? 'bg-gradient-to-r from-green-500 to-green-600 text-white' :
-                    lead.status === 'Gewonnen' ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white' :
-                    'bg-gray-100 text-gray-700'
-                  }`}>
+                  <span className={`text-xs px-3 py-1.5 rounded-lg font-semibold shadow-sm ${lead.status === 'Neu' ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white' :
+                      lead.status === 'Qualifiziert' ? 'bg-gradient-to-r from-green-500 to-green-600 text-white' :
+                        lead.status === 'Gewonnen' ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white' :
+                          'bg-gray-100 text-gray-700'
+                    }`}>
                     {lead.status}
                   </span>
                   <span className="text-base font-bold text-gray-900 whitespace-nowrap">€{lead.value?.toLocaleString() || '0'}</span>
