@@ -223,7 +223,7 @@ export function isLoggedIn(): boolean {
 // API Integration - Website CRM Scraper Backend
 // --------------------------------------------------------------------------
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://website-crm-scraper-backend-production.up.railway.app';
 
 export async function getLeads(): Promise<Lead[]> {
   try {
