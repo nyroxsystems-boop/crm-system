@@ -19,13 +19,13 @@ export function Login({ onLogin }: LoginProps) {
 
     setTimeout(() => {
       const user = login(username, password);
-      
+
       if (user) {
         onLogin();
       } else {
         setError('Ungültige Anmeldedaten. Bitte versuchen Sie es erneut.');
       }
-      
+
       setLoading(false);
     }, 500);
   };
@@ -38,7 +38,7 @@ export function Login({ onLogin }: LoginProps) {
           <div className="inline-flex items-center justify-center w-20 h-20 bg-white rounded-2xl shadow-2xl shadow-purple-900/50 mb-6">
             <Sparkles className="w-10 h-10 text-[#7c3aed]" />
           </div>
-          <h1 className="text-4xl font-bold text-white mb-2">Händler CRM</h1>
+          <h1 className="text-4xl font-bold text-white mb-2">Website CRM</h1>
           <p className="text-purple-100">Melden Sie sich an, um fortzufahren</p>
         </div>
 

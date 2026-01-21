@@ -1,10 +1,19 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Filter, MoreVertical, Edit, Trash2, Eye, Download, Mail, Phone, Upload, ArrowUpDown, ArrowUp, ArrowDown, User, Clock, Calendar } from 'lucide-react';
+import { Plus, Search, Filter, MoreVertical, Edit, Trash2, Eye, Download, Mail, Phone, Upload, ArrowUpDown, ArrowUp, ArrowDown, User, Clock, Calendar, Globe, ExternalLink, Star } from 'lucide-react';
 import { getLeads, saveLead, deleteLead, getUsers, type Lead } from '../utils/storage';
 import { LeadModal } from './LeadModal';
 import { LeadDetailModal } from './LeadDetailModal';
 import { ImportModal } from './ImportModal';
 import { CustomSelect } from './CustomSelect';
+
+// Score color helper
+const getScoreColor = (score: number | undefined): { bg: string; text: string; label: string } => {
+  if (!score || score === 0) return { bg: 'bg-gray-100', text: 'text-gray-500', label: 'N/A' };
+  if (score >= 70) return { bg: 'bg-red-100', text: 'text-red-700', label: 'Schlecht' };
+  if (score >= 50) return { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Mäßig' };
+  if (score >= 30) return { bg: 'bg-yellow-100', text: 'text-yellow-700', label: 'OK' };
+  return { bg: 'bg-green-100', text: 'text-green-700', label: 'Gut' };
+};
 
 export function LeadsView() {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -232,88 +241,120 @@ export function LeadsView() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Firma</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Kontakt</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Status</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Wert</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Zugewiesen</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Zuletzt bearbeitet</th>
+                <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">Firma</th>
+                <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">Kontakt</th>
+                <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 text-center">Score</th>
+                <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">Status</th>
+                <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">Quelle</th>
+                <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">Aktualisiert</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredLeads.map((lead) => (
-                <tr
-                  key={lead.id}
-                  onClick={() => setDetailLead(lead)}
-                  className="hover:bg-purple-50/50 transition-colors cursor-pointer"
-                >
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-[#7c3aed] to-[#a78bfa] rounded-lg flex items-center justify-center shadow-sm shadow-purple-500/20">
-                        <span className="text-white font-bold">{lead.company[0]}</span>
-                      </div>
-                      <div>
-                        <div className="font-semibold text-gray-900">{lead.company}</div>
-                        <div className="text-sm text-gray-500">{lead.industry || 'Keine Branche'}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div>
-                      <div className="text-gray-900 font-medium">{lead.contactPerson}</div>
-                      <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
-                        <Mail className="w-3 h-3" />
-                        {lead.email}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="space-y-2">
-                      <span className={`px-3 py-1.5 rounded-lg text-xs font-medium ${statusColors[lead.status]}`}>
-                        {lead.status}
-                      </span>
-                      {lead.priority && (
-                        <span className={`block px-3 py-1.5 rounded-lg text-xs font-medium ${priorityColors[lead.priority]} w-fit`}>
-                          {lead.priority}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div>
-                      <span className="font-semibold text-gray-900">€{lead.value?.toLocaleString() || '0'}</span>
-                      <p className="text-xs text-gray-500 mt-1">{lead.source}</p>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg flex items-center justify-center">
-                        <span className="text-white text-xs font-bold">{lead.assignedTo?.[0] || '?'}</span>
-                      </div>
-                      <span className="text-sm text-gray-700">{lead.assignedTo || 'Nicht zugewiesen'}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div>
-                      {lead.lastModifiedBy && (
-                        <div className="flex items-center gap-2 text-sm text-gray-600">
-                          <User className="w-3 h-3" />
-                          <span>{lead.lastModifiedBy}</span>
+              {filteredLeads.map((lead) => {
+                const score = lead.designScore || lead.leadScore;
+                const scoreStyle = getScoreColor(score);
+                return (
+                  <tr
+                    key={lead.id}
+                    onClick={() => setDetailLead(lead)}
+                    className="hover:bg-purple-50/50 transition-colors cursor-pointer"
+                  >
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-br from-[#7c3aed] to-[#a78bfa] rounded-lg flex items-center justify-center shadow-sm shadow-purple-500/20 flex-shrink-0">
+                          <span className="text-white font-bold">{lead.company[0]}</span>
                         </div>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-gray-900 truncate max-w-[200px]">{lead.company}</div>
+                          <div className="text-xs text-gray-500 truncate max-w-[200px]">{lead.industry || lead.niche || 'Keine Branche'}</div>
+                          {(lead.website || lead.websiteUrl) && (
+                            <a
+                              href={lead.website || lead.websiteUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 mt-0.5 truncate max-w-[200px]"
+                            >
+                              <Globe className="w-3 h-3 flex-shrink-0" />
+                              <span className="truncate">{(lead.website || lead.websiteUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, '')}</span>
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="space-y-1">
+                        {lead.contactPerson && (
+                          <div className="text-gray-900 font-medium text-sm truncate max-w-[180px]">{lead.contactPerson}</div>
+                        )}
+                        {lead.email && lead.email !== 'nicht gefunden' && (
+                          <a
+                            href={`mailto:${lead.email}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-xs text-gray-600 hover:text-purple-600 flex items-center gap-1 truncate max-w-[180px]"
+                          >
+                            <Mail className="w-3 h-3 flex-shrink-0" />
+                            <span className="truncate">{lead.email}</span>
+                          </a>
+                        )}
+                        {lead.phone && (
+                          <a
+                            href={`tel:${lead.phone}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-xs text-gray-600 hover:text-purple-600 flex items-center gap-1"
+                          >
+                            <Phone className="w-3 h-3 flex-shrink-0" />
+                            <span>{lead.phone}</span>
+                          </a>
+                        )}
+                        {(lead.city || lead.address) && (
+                          <div className="text-xs text-gray-400 truncate max-w-[180px]">
+                            {lead.city || lead.address}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      {score ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${scoreStyle.bg} ${scoreStyle.text}`}>
+                            {score}/100
+                          </span>
+                          <span className="text-[10px] text-gray-500">{scoreStyle.label}</span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
                       )}
-                      <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="space-y-1">
+                        <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${statusColors[lead.status]}`}>
+                          {lead.status}
+                        </span>
+                        {lead.priority && (
+                          <span className={`block px-2.5 py-1 rounded-lg text-xs font-medium ${priorityColors[lead.priority]} w-fit`}>
+                            {lead.priority}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <div>
+                        <span className="text-sm font-medium text-gray-900">{lead.source}</span>
+                        {lead.value && lead.value > 0 && (
+                          <p className="text-xs text-gray-500 mt-0.5">€{lead.value.toLocaleString()}</p>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-2 text-xs text-gray-500">
                         <Clock className="w-3 h-3" />
                         <span>{formatRelativeTime(lead.updatedAt)}</span>
                       </div>
-                      {lead.createdBy && (
-                        <div className="text-xs text-gray-400 mt-1">
-                          Erstellt von {lead.createdBy}
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {filteredLeads.length === 0 && (

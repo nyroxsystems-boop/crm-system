@@ -6,17 +6,18 @@ import { Settings } from './components/Settings';
 import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
 import { PipelineSettings } from './components/PipelineSettings';
-import { LayoutDashboard, Users, Workflow, Settings as SettingsIcon, Sparkles, Menu, X, LogOut, UserCog, Layers } from 'lucide-react';
+import { ScraperView } from './components/ScraperView';
+import { LayoutDashboard, Users, Workflow, Settings as SettingsIcon, Sparkles, Menu, X, LogOut, UserCog, Layers, Globe } from 'lucide-react';
 import { isLoggedIn, logout, getCurrentUser } from './utils/storage';
 
 export default function App() {
-  const [activeView, setActiveView] = useState<'dashboard' | 'leads' | 'pipeline' | 'settings' | 'users' | 'pipelineSettings'>('dashboard');
+  const [activeView, setActiveView] = useState<'dashboard' | 'leads' | 'pipeline' | 'scraper' | 'settings' | 'users' | 'pipelineSettings'>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [loggedIn, setLoggedIn] = useState(isLoggedIn());
   const currentUser = getCurrentUser();
 
-  const handleNavigate = (view: 'dashboard' | 'leads' | 'pipeline' | 'settings' | 'users' | 'pipelineSettings') => {
+  const handleNavigate = (view: 'dashboard' | 'leads' | 'pipeline' | 'scraper' | 'settings' | 'users' | 'pipelineSettings') => {
     setActiveView(view);
     setIsMobileMenuOpen(false);
   };
@@ -48,13 +49,13 @@ export default function App() {
                   <Menu className="w-5 h-5 text-gray-700" />
                 )}
               </button>
-              
+
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-gradient-to-br from-[#7c3aed] to-[#a78bfa] rounded-xl flex items-center justify-center shadow-lg glow-purple">
                   <Sparkles className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-base md:text-lg font-bold bg-gradient-to-r from-gray-900 via-purple-900 to-gray-900 bg-clip-text text-transparent">Händler CRM</h1>
+                  <h1 className="text-base md:text-lg font-bold bg-gradient-to-r from-gray-900 via-purple-900 to-gray-900 bg-clip-text text-transparent">Website CRM</h1>
                   <p className="text-xs text-gray-500 hidden md:block">Premium Edition</p>
                 </div>
               </div>
@@ -92,7 +93,7 @@ export default function App() {
         )}
 
         {/* Sidebar - Desktop with Hover */}
-        <aside 
+        <aside
           className={`
             hidden lg:block relative
             bg-white/80 backdrop-blur-xl border-r border-gray-200/50
@@ -105,11 +106,10 @@ export default function App() {
           <nav className="p-4 space-y-2">
             <button
               onClick={() => handleNavigate('dashboard')}
-              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${
-                activeView === 'dashboard'
-                  ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                  : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-              }`}
+              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'dashboard'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
               title={!isSidebarExpanded ? 'Dashboard' : ''}
             >
               <LayoutDashboard className="w-5 h-5 flex-shrink-0" />
@@ -117,11 +117,10 @@ export default function App() {
             </button>
             <button
               onClick={() => handleNavigate('leads')}
-              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${
-                activeView === 'leads'
-                  ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                  : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-              }`}
+              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'leads'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
               title={!isSidebarExpanded ? 'Leads' : ''}
             >
               <Users className="w-5 h-5 flex-shrink-0" />
@@ -129,17 +128,27 @@ export default function App() {
             </button>
             <button
               onClick={() => handleNavigate('pipeline')}
-              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${
-                activeView === 'pipeline'
-                  ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                  : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-              }`}
+              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'pipeline'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
               title={!isSidebarExpanded ? 'Pipeline' : ''}
             >
               <Workflow className="w-5 h-5 flex-shrink-0" />
               {isSidebarExpanded && <span className="whitespace-nowrap">Pipeline</span>}
             </button>
-            
+            <button
+              onClick={() => handleNavigate('scraper')}
+              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'scraper'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
+              title={!isSidebarExpanded ? 'Scraper' : ''}
+            >
+              <Globe className="w-5 h-5 flex-shrink-0" />
+              {isSidebarExpanded && <span className="whitespace-nowrap">Scraper</span>}
+            </button>
+
             {/* Divider */}
             {isSidebarExpanded && (
               <div className="pt-4 mt-4 border-t border-gray-200/50">
@@ -149,14 +158,13 @@ export default function App() {
             {!isSidebarExpanded && (
               <div className="pt-2 mt-2 border-t border-gray-200/50"></div>
             )}
-            
+
             <button
               onClick={() => handleNavigate('settings')}
-              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${
-                activeView === 'settings'
-                  ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                  : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-              }`}
+              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'settings'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
               title={!isSidebarExpanded ? 'Einstellungen' : ''}
             >
               <SettingsIcon className="w-5 h-5 flex-shrink-0" />
@@ -164,11 +172,10 @@ export default function App() {
             </button>
             <button
               onClick={() => handleNavigate('users')}
-              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${
-                activeView === 'users'
-                  ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                  : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-              }`}
+              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'users'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
               title={!isSidebarExpanded ? 'Benutzerverwaltung' : ''}
             >
               <UserCog className="w-5 h-5 flex-shrink-0" />
@@ -176,11 +183,10 @@ export default function App() {
             </button>
             <button
               onClick={() => handleNavigate('pipelineSettings')}
-              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${
-                activeView === 'pipelineSettings'
-                  ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                  : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-              }`}
+              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'pipelineSettings'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
               title={!isSidebarExpanded ? 'Pipeline-Einstellungen' : ''}
             >
               <Layers className="w-5 h-5 flex-shrink-0" />
@@ -200,68 +206,72 @@ export default function App() {
           <nav className="p-4 space-y-2">
             <button
               onClick={() => handleNavigate('dashboard')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${
-                activeView === 'dashboard'
-                  ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                  : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-              }`}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'dashboard'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
             >
               <LayoutDashboard className="w-5 h-5" />
               <span>Dashboard</span>
             </button>
             <button
               onClick={() => handleNavigate('leads')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${
-                activeView === 'leads'
-                  ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                  : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-              }`}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'leads'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
             >
               <Users className="w-5 h-5" />
               <span>Leads</span>
             </button>
             <button
               onClick={() => handleNavigate('pipeline')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${
-                activeView === 'pipeline'
-                  ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                  : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-              }`}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'pipeline'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
             >
               <Workflow className="w-5 h-5" />
               <span>Pipeline</span>
+            </button>
+            <button
+              onClick={() => handleNavigate('scraper')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'scraper'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
+            >
+              <Globe className="w-5 h-5" />
+              <span>Scraper</span>
             </button>
             <div className="pt-4 mt-4 border-t border-gray-200/50">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-4 mb-2">Administration</p>
               <button
                 onClick={() => handleNavigate('settings')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${
-                  activeView === 'settings'
-                    ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                    : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'settings'
+                  ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                  : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                  }`}
               >
                 <SettingsIcon className="w-5 h-5" />
                 <span>Einstellungen</span>
               </button>
               <button
                 onClick={() => handleNavigate('users')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${
-                  activeView === 'users'
-                    ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                    : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'users'
+                  ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                  : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                  }`}
               >
                 <UserCog className="w-5 h-5" />
                 <span>Benutzerverwaltung</span>
               </button>
               <button
                 onClick={() => handleNavigate('pipelineSettings')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${
-                  activeView === 'pipelineSettings'
-                    ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                    : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-                }`}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'pipelineSettings'
+                  ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                  : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                  }`}
               >
                 <Layers className="w-5 h-5" />
                 <span>Pipeline-Einstellungen</span>
@@ -275,6 +285,7 @@ export default function App() {
           {activeView === 'dashboard' && <Dashboard />}
           {activeView === 'leads' && <LeadsView />}
           {activeView === 'pipeline' && <PipelineView />}
+          {activeView === 'scraper' && <ScraperView />}
           {activeView === 'settings' && <Settings />}
           {activeView === 'users' && <UserManagement />}
           {activeView === 'pipelineSettings' && <PipelineSettings />}

@@ -19,6 +19,7 @@ export function Dashboard() {
     loadLeads();
   }, []);
 
+  // Basic stats
   const stats = {
     total: leads.length,
     new: leads.filter(l => l.status === 'Neu').length,
@@ -27,6 +28,28 @@ export function Dashboard() {
     totalValue: leads.reduce((sum, l) => sum + (l.value || 0), 0),
     avgValue: leads.length > 0 ? leads.reduce((sum, l) => sum + (l.value || 0), 0) / leads.length : 0,
   };
+
+  // Scraper-specific stats
+  const scraperStats = {
+    avgDesignScore: leads.filter(l => l.designScore).length > 0
+      ? Math.round(leads.reduce((sum, l) => sum + (l.designScore || 0), 0) / leads.filter(l => l.designScore).length)
+      : 0,
+    withEmail: leads.filter(l => l.email && l.email !== 'nicht gefunden' && l.email !== '').length,
+    withPhone: leads.filter(l => l.phone).length,
+    withWebsite: leads.filter(l => l.website || l.websiteUrl).length,
+    fromScraper: leads.filter(l => l.source === 'Umkreissuche' || l.source === 'Scraper').length,
+    avgRating: leads.filter(l => l.googleRating).length > 0
+      ? (leads.reduce((sum, l) => sum + (l.googleRating || 0), 0) / leads.filter(l => l.googleRating).length).toFixed(1)
+      : 'N/A',
+  };
+
+  // Score distribution for chart
+  const scoreDistribution = [
+    { name: '0-29 (Gut)', count: leads.filter(l => l.designScore !== undefined && l.designScore < 30).length, color: '#22c55e' },
+    { name: '30-49 (OK)', count: leads.filter(l => l.designScore !== undefined && l.designScore >= 30 && l.designScore < 50).length, color: '#eab308' },
+    { name: '50-69 (Mäßig)', count: leads.filter(l => l.designScore !== undefined && l.designScore >= 50 && l.designScore < 70).length, color: '#f97316' },
+    { name: '70-100 (Schlecht)', count: leads.filter(l => l.designScore !== undefined && l.designScore >= 70).length, color: '#ef4444' },
+  ];
 
   const recentLeads = leads.slice(0, 5);
 
@@ -107,6 +130,89 @@ export function Dashboard() {
           </div>
           <p className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-purple-600 to-purple-800 bg-clip-text text-transparent mb-1">€{stats.totalValue.toLocaleString()}</p>
           <p className="text-sm font-medium text-gray-500">Gesamtwert</p>
+        </div>
+      </div>
+
+      {/* Scraper Stats Row */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
+        <div className="bg-white p-4 rounded-xl border border-gray-200 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-400 to-blue-500 rounded-lg flex items-center justify-center">
+              <Eye className="w-4 h-4 text-white" />
+            </div>
+            <span className="text-xs font-medium text-gray-500">Ø Score</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{scraperStats.avgDesignScore}<span className="text-sm font-normal text-gray-400">/100</span></p>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-gray-200 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 bg-gradient-to-br from-green-400 to-green-500 rounded-lg flex items-center justify-center">
+              <CheckCircle className="w-4 h-4 text-white" />
+            </div>
+            <span className="text-xs font-medium text-gray-500">Mit E-Mail</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{scraperStats.withEmail}<span className="text-sm font-normal text-gray-400">/{stats.total}</span></p>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-gray-200 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 bg-gradient-to-br from-purple-400 to-purple-500 rounded-lg flex items-center justify-center">
+              <CheckCircle className="w-4 h-4 text-white" />
+            </div>
+            <span className="text-xs font-medium text-gray-500">Mit Telefon</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{scraperStats.withPhone}<span className="text-sm font-normal text-gray-400">/{stats.total}</span></p>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-gray-200 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 bg-gradient-to-br from-cyan-400 to-cyan-500 rounded-lg flex items-center justify-center">
+              <TrendingUp className="w-4 h-4 text-white" />
+            </div>
+            <span className="text-xs font-medium text-gray-500">Gescraped</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{scraperStats.fromScraper}</p>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-gray-200 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-lg flex items-center justify-center">
+              <AlertCircle className="w-4 h-4 text-white" />
+            </div>
+            <span className="text-xs font-medium text-gray-500">Ø Google</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{scraperStats.avgRating}<span className="text-sm font-normal text-gray-400">⭐</span></p>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-gray-200 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 bg-gradient-to-br from-pink-400 to-pink-500 rounded-lg flex items-center justify-center">
+              <Users className="w-4 h-4 text-white" />
+            </div>
+            <span className="text-xs font-medium text-gray-500">Vollständig</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{Math.round((scraperStats.withEmail / Math.max(stats.total, 1)) * 100)}<span className="text-sm font-normal text-gray-400">%</span></p>
+        </div>
+      </div>
+
+      {/* Score Distribution */}
+      <div className="bg-white p-6 rounded-2xl border border-gray-200">
+        <h3 className="text-lg font-bold text-gray-900 mb-4">Score-Verteilung (Leads)</h3>
+        <div className="flex items-end gap-2 h-24">
+          {scoreDistribution.map((item, i) => (
+            <div key={i} className="flex-1 flex flex-col items-center">
+              <div
+                className="w-full rounded-t-lg transition-all hover:scale-105"
+                style={{
+                  height: `${Math.max((item.count / Math.max(...scoreDistribution.map(d => d.count), 1)) * 80, 8)}px`,
+                  backgroundColor: item.color
+                }}
+              />
+              <span className="text-xs text-gray-500 mt-2 text-center">{item.name}</span>
+              <span className="text-sm font-bold text-gray-700">{item.count}</span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -214,9 +320,9 @@ export function Dashboard() {
                 </div>
                 <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 md:gap-3">
                   <span className={`text-xs px-3 py-1.5 rounded-lg font-semibold shadow-sm ${lead.status === 'Neu' ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white' :
-                      lead.status === 'Qualifiziert' ? 'bg-gradient-to-r from-green-500 to-green-600 text-white' :
-                        lead.status === 'Gewonnen' ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white' :
-                          'bg-gray-100 text-gray-700'
+                    lead.status === 'Qualifiziert' ? 'bg-gradient-to-r from-green-500 to-green-600 text-white' :
+                      lead.status === 'Gewonnen' ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white' :
+                        'bg-gray-100 text-gray-700'
                     }`}>
                     {lead.status}
                   </span>

@@ -15,8 +15,11 @@ export interface Lead {
   email: string;
   phone?: string;
   website?: string;
+  websiteUrl?: string;
   industry?: string;
+  niche?: string;
   city?: string;
+  region?: string;
   country?: string;
   address?: string;
   status: string;
@@ -26,9 +29,21 @@ export interface Lead {
   assignedTo?: string;
   notes?: string;
   tags: string[];
+  // AI Analysis Fields
+  designScore?: number;
+  designAnalysis?: string;
+  mobileResponsive?: boolean;
+  hasSsl?: boolean;
+  loadTimeMs?: number;
   leadScore?: number;
+  // Google Places Data
+  googleRating?: number;
+  socialLinks?: string[];
+  openingHours?: string;
   lastContactDate?: string;
   nextFollowUpDate?: string;
+  scrapedAt?: string;
+  lastEvaluatedAt?: string;
   createdAt: string;
   updatedAt: string;
   createdBy?: string;
@@ -86,7 +101,7 @@ const defaultSettings: Settings = {
   sources: ['Website', 'Telefon', 'E-Mail', 'Empfehlung', 'Messe', 'LinkedIn', 'Kaltakquise', 'Partner'],
   industries: ['Automotive', 'Maschinenbau', 'IT & Software', 'Handel', 'Dienstleistung', 'Logistik', 'Produktion', 'Sonstiges'],
   tags: ['VIP', 'Großkunde', 'Neukunde', 'Stammkunde', 'Potenziell', 'Kritisch'],
-  companyName: 'Händler CRM',
+  companyName: 'Website CRM',
   currency: 'EUR',
   statuses: ['Neu', 'Kontaktiert', 'Qualifiziert', 'Angebot', 'Verhandlung', 'Gewonnen', 'Verloren'],
 };
@@ -205,16 +220,14 @@ export function isLoggedIn(): boolean {
 }
 
 // --------------------------------------------------------------------------
-// API Integration (Bot Service -> InvenTree)
+// API Integration - Website CRM Scraper Backend
 // --------------------------------------------------------------------------
 
-// In production, this should be the URL of your Bot Service
-// e.g. "https://autoteile-bot-service.onrender.com"
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://whatsapp-bot-oem-ermittlung.onrender.com';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
 export async function getLeads(): Promise<Lead[]> {
   try {
-    const res = await fetch(`${API_BASE_URL}/api/crm/leads`);
+    const res = await fetch(`${API_BASE_URL}/api/leads`);
     if (!res.ok) throw new Error('Failed to fetch leads');
     return await res.json();
   } catch (error) {
@@ -226,16 +239,15 @@ export async function getLeads(): Promise<Lead[]> {
 export async function saveLead(lead: Partial<Lead>): Promise<void> {
   try {
     if (lead.id) {
-      // Update (Note: InvenTree ID is usually a number, but we handle string/number mapping in Bot)
-      // We use PATCH /leads/:id
-      await fetch(`${API_BASE_URL}/api/crm/leads/${lead.id}`, {
+      // Update existing lead
+      await fetch(`${API_BASE_URL}/api/leads/${lead.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(lead)
       });
     } else {
-      // Create
-      await fetch(`${API_BASE_URL}/api/crm/leads`, {
+      // Create new lead
+      await fetch(`${API_BASE_URL}/api/leads`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(lead)
@@ -249,11 +261,77 @@ export async function saveLead(lead: Partial<Lead>): Promise<void> {
 
 export async function deleteLead(id: string): Promise<void> {
   try {
-    await fetch(`${API_BASE_URL}/api/crm/leads/${id}`, {
+    await fetch(`${API_BASE_URL}/api/leads/${id}`, {
       method: 'DELETE',
     });
   } catch (error) {
     console.error('Error deleting lead:', error);
+    throw error;
+  }
+}
+
+// Scraper API Functions
+export async function evaluateWebsite(url: string, niche?: string, companyName?: string, city?: string): Promise<any> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/scraper/evaluate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, niche, companyName, city })
+    });
+    if (!res.ok) throw new Error('Failed to evaluate website');
+    return await res.json();
+  } catch (error) {
+    console.error('Error evaluating website:', error);
+    throw error;
+  }
+}
+
+export async function startScraping(websites: string[], niche: string, location?: string): Promise<{ jobId: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/scraper/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ websites, niche, location })
+    });
+    if (!res.ok) throw new Error('Failed to start scraping');
+    return await res.json();
+  } catch (error) {
+    console.error('Error starting scraper:', error);
+    throw error;
+  }
+}
+
+export async function getScrapingStatus(jobId: string): Promise<{ status: string; processed: number; total: number }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/scraper/status/${jobId}`);
+    if (!res.ok) throw new Error('Failed to get scraping status');
+    return await res.json();
+  } catch (error) {
+    console.error('Error getting scraping status:', error);
+    throw error;
+  }
+}
+
+// Radius Search API - Umkreissuche mit Google Places
+export async function startRadiusSearch(
+  location: string,
+  radiusKm: number,
+  niche: string,
+  scoreThreshold: number = 60
+): Promise<{ jobId: string; message: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/scraper/radius-search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location, radiusKm, niche, scoreThreshold })
+    });
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.error || 'Failed to start radius search');
+    }
+    return await res.json();
+  } catch (error) {
+    console.error('Error starting radius search:', error);
     throw error;
   }
 }

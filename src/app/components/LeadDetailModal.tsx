@@ -101,11 +101,11 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete }: LeadDetailM
   };
 
   return (
-    <div 
+    <div
       className="fixed inset-0 bg-black bg-opacity-20 backdrop-blur-sm flex items-center justify-center z-50 p-4"
       onClick={onClose}
     >
-      <div 
+      <div
         className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto my-8 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -126,7 +126,7 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete }: LeadDetailM
               <X className="w-6 h-6 text-white" />
             </button>
           </div>
-          
+
           <div className="flex items-start gap-5">
             <div className="w-16 h-16 md:w-20 md:h-20 bg-white rounded-2xl flex items-center justify-center shadow-xl flex-shrink-0">
               <span className="text-2xl md:text-3xl font-bold text-[#7c3aed]">{lead.company[0]}</span>
@@ -143,11 +143,20 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete }: LeadDetailM
                     {lead.priority}
                   </span>
                 )}
-                {lead.leadScore !== undefined && lead.leadScore > 0 && (
-                  <span className="px-3 md:px-4 py-1.5 md:py-2 bg-white/20 text-white rounded-xl font-semibold text-xs md:text-sm">
-                    Score: {lead.leadScore}/100
-                  </span>
-                )}
+                {(lead.designScore || lead.leadScore) ? (() => {
+                  const score = lead.designScore || lead.leadScore || 0;
+                  let scoreColor = 'bg-gray-500';
+                  let scoreLabel = 'Score';
+                  if (score >= 70) { scoreColor = 'bg-red-500'; scoreLabel = 'Schlecht'; }
+                  else if (score >= 50) { scoreColor = 'bg-orange-500'; scoreLabel = 'Mäßig'; }
+                  else if (score >= 30) { scoreColor = 'bg-yellow-500'; scoreLabel = 'OK'; }
+                  else { scoreColor = 'bg-green-500'; scoreLabel = 'Gut'; }
+                  return (
+                    <span className={`px-3 md:px-4 py-1.5 md:py-2 ${scoreColor} text-white rounded-xl font-semibold text-xs md:text-sm`}>
+                      🎯 {score}/100 • {scoreLabel}
+                    </span>
+                  );
+                })() : null}
               </div>
             </div>
           </div>
@@ -158,11 +167,10 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete }: LeadDetailM
           <div className="flex gap-4">
             <button
               onClick={() => setActiveTab('details')}
-              className={`px-4 py-3 font-semibold transition-colors relative ${
-                activeTab === 'details'
+              className={`px-4 py-3 font-semibold transition-colors relative ${activeTab === 'details'
                   ? 'text-[#7c3aed]'
                   : 'text-gray-500 hover:text-gray-700'
-              }`}
+                }`}
             >
               Details
               {activeTab === 'details' && (
@@ -171,11 +179,10 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete }: LeadDetailM
             </button>
             <button
               onClick={() => setActiveTab('activities')}
-              className={`px-4 py-3 font-semibold transition-colors relative ${
-                activeTab === 'activities'
+              className={`px-4 py-3 font-semibold transition-colors relative ${activeTab === 'activities'
                   ? 'text-[#7c3aed]'
                   : 'text-gray-500 hover:text-gray-700'
-              }`}
+                }`}
             >
               Aktivitäten ({activities.length})
               {activeTab === 'activities' && (
@@ -439,11 +446,10 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete }: LeadDetailM
                             {activity.type === 'task' && (
                               <button
                                 onClick={() => handleToggleActivity(activity)}
-                                className={`p-1.5 rounded-lg transition-colors ${
-                                  activity.completed
+                                className={`p-1.5 rounded-lg transition-colors ${activity.completed
                                     ? 'bg-green-100 text-green-600'
                                     : 'bg-gray-100 text-gray-400 hover:bg-green-50 hover:text-green-600'
-                                }`}
+                                  }`}
                               >
                                 <CheckCircle className="w-4 h-4" />
                               </button>
