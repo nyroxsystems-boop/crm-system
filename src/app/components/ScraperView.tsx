@@ -230,15 +230,22 @@ export function ScraperView() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2">Nische</label>
-                        <select
-                            value={niche}
-                            onChange={(e) => setNiche(e.target.value)}
-                            className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white"
-                        >
-                            {NICHES.map(n => (
-                                <option key={n} value={n}>{n}</option>
-                            ))}
-                        </select>
+                        <div className="relative">
+                            <select
+                                value={niche}
+                                onChange={(e) => setNiche(e.target.value)}
+                                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white appearance-none cursor-pointer text-gray-900 font-medium pr-10 hover:border-purple-300 transition-colors"
+                            >
+                                {NICHES.map(n => (
+                                    <option key={n} value={n}>{n}</option>
+                                ))}
+                            </select>
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </div>
+                        </div>
                     </div>
 
                     {activeTab === 'manual' ? (
