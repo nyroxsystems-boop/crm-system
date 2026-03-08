@@ -102,13 +102,6 @@ export function Login({ onLogin }: LoginProps) {
               )}
             </button>
           </form>
-
-          {/* Demo Info */}
-          <div className="mt-6 p-4 bg-purple-50 border border-purple-200 rounded-xl">
-            <p className="text-sm font-semibold text-purple-900 mb-2">Demo-Zugang:</p>
-            <p className="text-xs text-purple-700">Benutzername: <span className="font-mono font-semibold">admin</span></p>
-            <p className="text-xs text-purple-700">Passwort: <span className="font-mono font-semibold">admin123</span></p>
-          </div>
         </div>
 
         {/* Footer */}
