@@ -1,11 +1,37 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Mail, Send, MapPin, Target, TrendingUp, Users, CheckCircle, Clock,
   AlertCircle, Play, Pause, RotateCw, Eye, Zap, Globe, ChevronRight,
-  ArrowRight, Search, RefreshCw, Loader2, MailCheck, MailX, MailOpen
+  ArrowRight, Search, RefreshCw, Loader2, MailCheck, MailX, MailOpen,
+  Power, Rocket
 } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://website-crm-scraper-backend-production.up.railway.app';
+
+interface AutoPilotStatus {
+  running: boolean;
+  startedAt: string | null;
+  runtime: string;
+  config: {
+    discoveryIntervalMinutes: number;
+    campaignIntervalMinutes: number;
+    followUpIntervalMinutes: number;
+    maxEmailsPerBatch: number;
+    maxDiscoveryPerRun: number;
+  };
+  stats: {
+    totalDiscovered: number;
+    totalSent: number;
+    totalFollowUps: number;
+    cycleCount: number;
+  };
+  lastActivity: {
+    discovery: string | null;
+    campaign: string | null;
+    followUp: string | null;
+  };
+  errors: string[];
+}
 
 interface OutreachStats {
   outreach: {
@@ -27,6 +53,7 @@ interface OutreachStats {
     totalCombinations: number;
     currentIndex: number;
   };
+  autopilot?: AutoPilotStatus;
 }
 
 interface Bundesland {
@@ -54,6 +81,8 @@ export function OutreachView() {
   const [brochureUrl, setBrochureUrl] = useState('');
   const [showBrochure, setShowBrochure] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [togglingAutoPilot, setTogglingAutoPilot] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadStats = useCallback(async () => {
     try {
@@ -87,6 +116,42 @@ export function OutreachView() {
     }
     init();
   }, [loadStats, loadBundeslaender]);
+
+  // Auto-refresh when auto-pilot is running
+  useEffect(() => {
+    if (stats?.autopilot?.running) {
+      pollRef.current = setInterval(loadStats, 15000);
+    } else if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [stats?.autopilot?.running, loadStats]);
+
+  const handleToggleAutoPilot = async () => {
+    setTogglingAutoPilot(true);
+    const isRunning = stats?.autopilot?.running;
+    try {
+      const endpoint = isRunning ? 'autopilot/stop' : 'autopilot/start';
+      const res = await fetch(`${API_BASE_URL}/api/outreach/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      setStatusMessage({
+        type: data.success ? 'success' : 'error',
+        text: data.message || (isRunning ? 'Auto-Pilot gestoppt' : 'Auto-Pilot gestartet')
+      });
+      await loadStats();
+    } catch {
+      setStatusMessage({ type: 'error', text: 'Auto-Pilot konnte nicht umgeschaltet werden.' });
+    } finally {
+      setTogglingAutoPilot(false);
+    }
+  };
 
   const handleDiscover = async () => {
     if (!selectedBundesland) {
@@ -298,6 +363,104 @@ export function OutreachView() {
           <p className="text-3xl md:text-4xl font-bold text-gray-900 mb-1">{o.converted}</p>
           <p className="text-sm font-medium text-gray-500">Konvertiert</p>
         </div>
+      </div>
+
+      {/* ═══ AUTO-PILOT PANEL ═══ */}
+      <div className={`rounded-2xl border-2 p-6 transition-all ${
+        stats?.autopilot?.running
+          ? 'border-green-400 bg-gradient-to-r from-green-50 via-emerald-50 to-green-50 shadow-lg shadow-green-500/10'
+          : 'border-gray-200 bg-white'
+      }`}>
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-lg ${
+              stats?.autopilot?.running
+                ? 'bg-gradient-to-br from-green-500 to-emerald-600'
+                : 'bg-gradient-to-br from-gray-400 to-gray-500'
+            }`}>
+              <Rocket className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                Auto-Pilot
+                {stats?.autopilot?.running && (
+                  <span className="flex items-center gap-1.5 text-xs font-bold text-green-600 bg-green-100 px-2.5 py-1 rounded-full">
+                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                    AKTIV
+                  </span>
+                )}
+              </h3>
+              <p className="text-xs text-gray-500">
+                {stats?.autopilot?.running
+                  ? `Läuft seit ${stats.autopilot.runtime} — Zyklus #${stats.autopilot.stats.cycleCount}`
+                  : 'Automatisierte Lead-Suche + E-Mail-Versand'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleToggleAutoPilot}
+            disabled={togglingAutoPilot}
+            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm shadow-lg transition-all hover:scale-[1.03] disabled:opacity-50 ${
+              stats?.autopilot?.running
+                ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-red-500/30 hover:shadow-red-500/50'
+                : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-green-500/30 hover:shadow-green-500/50'
+            }`}
+          >
+            {togglingAutoPilot ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : stats?.autopilot?.running ? (
+              <Pause className="w-4 h-4" />
+            ) : (
+              <Play className="w-4 h-4" />
+            )}
+            {stats?.autopilot?.running ? 'Stoppen' : 'Starten'}
+          </button>
+        </div>
+
+        {/* Auto-Pilot Stats (when running or has stats) */}
+        {(stats?.autopilot?.running || (stats?.autopilot?.stats?.cycleCount ?? 0) > 0) && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
+              <p className="text-2xl font-bold text-purple-600">{stats?.autopilot?.stats?.totalDiscovered ?? 0}</p>
+              <p className="text-xs text-gray-500 mt-1">Entdeckt</p>
+            </div>
+            <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
+              <p className="text-2xl font-bold text-green-600">{stats?.autopilot?.stats?.totalSent ?? 0}</p>
+              <p className="text-xs text-gray-500 mt-1">Gesendet</p>
+            </div>
+            <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
+              <p className="text-2xl font-bold text-blue-600">{stats?.autopilot?.stats?.totalFollowUps ?? 0}</p>
+              <p className="text-xs text-gray-500 mt-1">Follow-Ups</p>
+            </div>
+            <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
+              <p className="text-2xl font-bold text-gray-700">{stats?.autopilot?.stats?.cycleCount ?? 0}</p>
+              <p className="text-xs text-gray-500 mt-1">Zyklen</p>
+            </div>
+          </div>
+        )}
+
+        {/* Config Info */}
+        {!stats?.autopilot?.running && (
+          <div className="flex flex-wrap gap-3 mt-4">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-50 rounded-lg">
+              <Search className="w-3.5 h-3.5 text-purple-500" />
+              <span className="text-xs font-medium text-purple-700">Discovery: alle 30 Min</span>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-lg">
+              <Send className="w-3.5 h-3.5 text-green-500" />
+              <span className="text-xs font-medium text-green-700">Kampagne: alle 60 Min</span>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-lg">
+              <RotateCw className="w-3.5 h-3.5 text-blue-500" />
+              <span className="text-xs font-medium text-blue-700">Follow-Ups: alle 6 Std</span>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 rounded-lg">
+              <Mail className="w-3.5 h-3.5 text-orange-500" />
+              <span className="text-xs font-medium text-orange-700">Max 10 Emails/Batch</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Niche Distribution */}
