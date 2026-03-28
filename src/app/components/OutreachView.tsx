@@ -3,7 +3,7 @@ import {
   Mail, Send, MapPin, Target, TrendingUp, Users, CheckCircle, Clock,
   AlertCircle, Play, Pause, RotateCw, Eye, Zap, Globe, ChevronRight,
   ArrowRight, Search, RefreshCw, Loader2, MailCheck, MailX, MailOpen,
-  Power, Rocket
+  Power, Rocket, Settings, ChevronDown
 } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://website-crm-scraper-backend-production.up.railway.app';
@@ -58,7 +58,7 @@ interface OutreachStats {
 
 interface Bundesland {
   name: string;
-  Städte: string[];
+  cities: string[];
 }
 
 const NISCHEN = [
@@ -82,7 +82,16 @@ export function OutreachView() {
   const [showBrochure, setShowBrochure] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [togglingAutoPilot, setTogglingAutoPilot] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Auto-Pilot config state
+  const [cfgDiscoveryMin, setCfgDiscoveryMin] = useState(30);
+  const [cfgCampaignMin, setCfgCampaignMin] = useState(60);
+  const [cfgFollowUpMin, setCfgFollowUpMin] = useState(360);
+  const [cfgMaxEmails, setCfgMaxEmails] = useState(10);
+  const [cfgMaxDiscovery, setCfgMaxDiscovery] = useState(15);
 
   const loadStats = useCallback(async () => {
     try {
@@ -90,6 +99,14 @@ export function OutreachView() {
       if (res.ok) {
         const data = await res.json();
         setStats(data);
+        // Sync config from server if autopilot has config
+        if (data.autopilot?.config) {
+          setCfgDiscoveryMin(data.autopilot.config.discoveryIntervalMinutes);
+          setCfgCampaignMin(data.autopilot.config.campaignIntervalMinutes);
+          setCfgFollowUpMin(data.autopilot.config.followUpIntervalMinutes);
+          setCfgMaxEmails(data.autopilot.config.maxEmailsPerBatch);
+          setCfgMaxDiscovery(data.autopilot.config.maxDiscoveryPerRun);
+        }
       }
     } catch (err) {
       console.error('Failed to load outreach stats:', err);
@@ -135,10 +152,17 @@ export function OutreachView() {
     const isRunning = stats?.autopilot?.running;
     try {
       const endpoint = isRunning ? 'autopilot/stop' : 'autopilot/start';
+      const body = isRunning ? {} : {
+        discoveryIntervalMinutes: cfgDiscoveryMin,
+        campaignIntervalMinutes: cfgCampaignMin,
+        followUpIntervalMinutes: cfgFollowUpMin,
+        maxEmailsPerBatch: cfgMaxEmails,
+        maxDiscoveryPerRun: cfgMaxDiscovery,
+      };
       const res = await fetch(`${API_BASE_URL}/api/outreach/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify(body)
       });
       const data = await res.json();
       setStatusMessage({
@@ -168,36 +192,13 @@ export function OutreachView() {
       });
       const data = await res.json();
       if (res.ok) {
-        setStatusMessage({ type: 'success', text: `✅ ${data.found || data.newLeads || 0} neue Leads gefunden!` });
+        setStatusMessage({ type: 'success', text: `✅ ${data.discovered || data.found || data.newLeads || 0} neue Leads gefunden!` });
         await loadStats();
       } else {
         setStatusMessage({ type: 'error', text: data.error || 'Fehler bei der Suche.' });
       }
-    } catch (err) {
+    } catch {
       setStatusMessage({ type: 'error', text: 'Netzwerkfehler bei der Suche.' });
-    } finally {
-      setDiscovering(false);
-    }
-  };
-
-  const handleAutoDiscover = async () => {
-    setDiscovering(true);
-    setStatusMessage({ type: 'info', text: 'Auto-Discovery startet...' });
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/outreach/discover`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setStatusMessage({ type: 'success', text: `✅ Discovery: ${data.found || data.newLeads || 0} neue Leads in ${data.bundesland || 'Auto'}` });
-        await loadStats();
-      } else {
-        setStatusMessage({ type: 'error', text: data.error || 'Fehler.' });
-      }
-    } catch (err) {
-      setStatusMessage({ type: 'error', text: 'Netzwerkfehler.' });
     } finally {
       setDiscovering(false);
     }
@@ -210,7 +211,7 @@ export function OutreachView() {
       const res = await fetch(`${API_BASE_URL}/api/outreach/campaign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxEmails: 20 })
+        body: JSON.stringify({ limit: cfgMaxEmails })
       });
       const data = await res.json();
       if (res.ok) {
@@ -219,7 +220,7 @@ export function OutreachView() {
       } else {
         setStatusMessage({ type: 'error', text: data.error || 'Kampagne fehlgeschlagen.' });
       }
-    } catch (err) {
+    } catch {
       setStatusMessage({ type: 'error', text: 'Kampagne konnte nicht gestartet werden.' });
     } finally {
       setSendingCampaign(false);
@@ -245,6 +246,8 @@ export function OutreachView() {
 
   const o = stats?.outreach || { total: 0, withEmail: 0, sent: 0, replied: 0, converted: 0, unsent: 0, conversionRate: '0', byBundesland: [] };
   const d = stats?.discovery || { total: 0, bySource: [], byBundesland: [], byNiche: [], nextTarget: { bundesland: '', city: '', niche: '' }, totalCombinations: 0, currentIndex: 0 };
+  const ap = stats?.autopilot;
+  const isRunning = ap?.running || false;
 
   return (
     <div className="p-4 md:p-8 space-y-6 md:space-y-8 bg-gradient-to-br from-gray-50 via-purple-50/30 to-gray-50">
@@ -253,7 +256,7 @@ export function OutreachView() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-gray-900 via-purple-900 to-gray-900 bg-clip-text text-transparent">
-              Email Outreach
+              E-Mail-Marketing
             </h2>
             <p className="text-gray-600 mt-2 text-sm md:text-base">
               PartsUnion — Automatisierter Bundesländer-Outreach
@@ -294,7 +297,6 @@ export function OutreachView() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        {/* Total Leads */}
         <div className="stats-card group animate-scale-in">
           <div className="flex items-center justify-between mb-4">
             <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
@@ -314,11 +316,10 @@ export function OutreachView() {
                 style={{ width: `${o.total > 0 ? (o.withEmail / o.total) * 100 : 0}%` }}
               />
             </div>
-            <span className="text-xs text-gray-500 font-medium">{o.withEmail} mit Email</span>
+            <span className="text-xs text-gray-500 font-medium">{o.withEmail} mit E-Mail</span>
           </div>
         </div>
 
-        {/* Sent */}
         <div className="stats-card group animate-scale-in" style={{ animationDelay: '0.1s' }}>
           <div className="flex items-center justify-between mb-4">
             <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300 glow-purple">
@@ -334,7 +335,6 @@ export function OutreachView() {
           <p className="text-xs text-gray-400 mt-2">{o.unsent} noch nicht kontaktiert</p>
         </div>
 
-        {/* Replied */}
         <div className="stats-card group animate-scale-in" style={{ animationDelay: '0.2s' }}>
           <div className="flex items-center justify-between mb-4">
             <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
@@ -349,7 +349,6 @@ export function OutreachView() {
           <p className="text-sm font-medium text-gray-500">Antworten</p>
         </div>
 
-        {/* Converted */}
         <div className="stats-card group animate-scale-in" style={{ animationDelay: '0.3s' }}>
           <div className="flex items-center justify-between mb-4">
             <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
@@ -365,193 +364,107 @@ export function OutreachView() {
         </div>
       </div>
 
-      {/* ═══ AUTO-PILOT PANEL ═══ */}
-      <div className={`rounded-2xl border-2 p-6 transition-all ${
-        stats?.autopilot?.running
-          ? 'border-green-400 bg-gradient-to-r from-green-50 via-emerald-50 to-green-50 shadow-lg shadow-green-500/10'
-          : 'border-gray-200 bg-white'
+      {/* ═══════════════════════════════════════════════════════
+          UNIFIED OUTREACH ENGINE — Auto-Pilot + Manual Discovery
+          ═══════════════════════════════════════════════════════ */}
+      <div className={`rounded-2xl border-2 overflow-hidden transition-all ${
+        isRunning
+          ? 'border-green-400 shadow-lg shadow-green-500/10'
+          : 'border-gray-200'
       }`}>
-        <div className="flex items-center justify-between mb-5">
-          <div className="flex items-center gap-3">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-lg ${
-              stats?.autopilot?.running
-                ? 'bg-gradient-to-br from-green-500 to-emerald-600'
-                : 'bg-gradient-to-br from-gray-400 to-gray-500'
-            }`}>
-              <Rocket className="w-6 h-6 text-white" />
+        {/* Engine Header */}
+        <div className={`p-6 ${
+          isRunning
+            ? 'bg-gradient-to-r from-green-50 via-emerald-50 to-green-50'
+            : 'bg-white'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-lg ${
+                isRunning
+                  ? 'bg-gradient-to-br from-green-500 to-emerald-600'
+                  : 'bg-gradient-to-br from-[#7c3aed] to-[#a78bfa]'
+              }`}>
+                <Rocket className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  Outreach Engine
+                  {isRunning && (
+                    <span className="flex items-center gap-1.5 text-xs font-bold text-green-600 bg-green-100 px-2.5 py-1 rounded-full">
+                      <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                      AUTO-PILOT AKTIV
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-gray-500">
+                  {isRunning
+                    ? `Läuft seit ${ap?.runtime} — Zyklus #${ap?.stats?.cycleCount || 0}`
+                    : 'Lead-Discovery + E-Mail-Kampagnen — Manuell oder Auto-Pilot'}
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                Auto-Pilot
-                {stats?.autopilot?.running && (
-                  <span className="flex items-center gap-1.5 text-xs font-bold text-green-600 bg-green-100 px-2.5 py-1 rounded-full">
-                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                    AKTIV
-                  </span>
+
+            <div className="flex items-center gap-2">
+              {/* Config Toggle */}
+              <button
+                onClick={() => setShowConfig(!showConfig)}
+                className={`p-2.5 rounded-xl border transition-all ${
+                  showConfig ? 'bg-purple-50 border-purple-300 text-purple-600' : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                }`}
+                title="Einstellungen"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+
+              {/* Auto-Pilot Toggle */}
+              <button
+                onClick={handleToggleAutoPilot}
+                disabled={togglingAutoPilot}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg transition-all hover:scale-[1.03] disabled:opacity-50 ${
+                  isRunning
+                    ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-red-500/30 hover:shadow-red-500/50'
+                    : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-green-500/30 hover:shadow-green-500/50'
+                }`}
+              >
+                {togglingAutoPilot ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : isRunning ? (
+                  <Pause className="w-4 h-4" />
+                ) : (
+                  <Play className="w-4 h-4" />
                 )}
-              </h3>
-              <p className="text-xs text-gray-500">
-                {stats?.autopilot?.running
-                  ? `Läuft seit ${stats.autopilot.runtime} — Zyklus #${stats.autopilot.stats.cycleCount}`
-                  : 'Automatisierte Lead-Suche + E-Mail-Versand'}
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={handleToggleAutoPilot}
-            disabled={togglingAutoPilot}
-            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm shadow-lg transition-all hover:scale-[1.03] disabled:opacity-50 ${
-              stats?.autopilot?.running
-                ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-red-500/30 hover:shadow-red-500/50'
-                : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-green-500/30 hover:shadow-green-500/50'
-            }`}
-          >
-            {togglingAutoPilot ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : stats?.autopilot?.running ? (
-              <Pause className="w-4 h-4" />
-            ) : (
-              <Play className="w-4 h-4" />
-            )}
-            {stats?.autopilot?.running ? 'Stoppen' : 'Starten'}
-          </button>
-        </div>
-
-        {/* Auto-Pilot Stats (when running or has stats) */}
-        {(stats?.autopilot?.running || (stats?.autopilot?.stats?.cycleCount ?? 0) > 0) && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
-              <p className="text-2xl font-bold text-purple-600">{stats?.autopilot?.stats?.totalDiscovered ?? 0}</p>
-              <p className="text-xs text-gray-500 mt-1">Entdeckt</p>
-            </div>
-            <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
-              <p className="text-2xl font-bold text-green-600">{stats?.autopilot?.stats?.totalSent ?? 0}</p>
-              <p className="text-xs text-gray-500 mt-1">Gesendet</p>
-            </div>
-            <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
-              <p className="text-2xl font-bold text-blue-600">{stats?.autopilot?.stats?.totalFollowUps ?? 0}</p>
-              <p className="text-xs text-gray-500 mt-1">Follow-Ups</p>
-            </div>
-            <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
-              <p className="text-2xl font-bold text-gray-700">{stats?.autopilot?.stats?.cycleCount ?? 0}</p>
-              <p className="text-xs text-gray-500 mt-1">Zyklen</p>
-            </div>
-          </div>
-        )}
-
-        {/* Config Info */}
-        {!stats?.autopilot?.running && (
-          <div className="flex flex-wrap gap-3 mt-4">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-50 rounded-lg">
-              <Search className="w-3.5 h-3.5 text-purple-500" />
-              <span className="text-xs font-medium text-purple-700">Discovery: alle 30 Min</span>
-            </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-lg">
-              <Send className="w-3.5 h-3.5 text-green-500" />
-              <span className="text-xs font-medium text-green-700">Kampagne: alle 60 Min</span>
-            </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-lg">
-              <RotateCw className="w-3.5 h-3.5 text-blue-500" />
-              <span className="text-xs font-medium text-blue-700">Follow-Ups: alle 6 Std</span>
-            </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 rounded-lg">
-              <Mail className="w-3.5 h-3.5 text-orange-500" />
-              <span className="text-xs font-medium text-orange-700">Max 10 Emails/Batch</span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Niche Distribution */}
-      {d.byNiche.length > 0 && (
-        <div className="bg-white p-6 rounded-2xl border border-gray-200">
-          <h3 className="text-lg font-bold text-gray-900 mb-4">Nischen-Verteilung</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {d.byNiche.map((n, i) => (
-              <div key={i} className="bg-gradient-to-br from-gray-50 to-purple-50/30 p-4 rounded-xl border border-gray-100 hover:border-purple-200 hover:shadow-md transition-all">
-                <p className="text-2xl font-bold text-gray-900">{n.count}</p>
-                <p className="text-xs text-gray-500 mt-1 truncate" title={n.niche}>{n.niche}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Discovery + Campaign Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Discovery Panel */}
-        <div className="card-premium bg-white p-6 rounded-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h3 className="text-lg font-bold text-gray-900">🔍 Lead Discovery</h3>
-              <p className="text-xs text-gray-500 mt-1">Neue Leads per Bundesland entdecken</p>
-            </div>
-            {d.nextTarget.bundesland && (
-              <div className="px-3 py-1.5 bg-purple-100 rounded-lg">
-                <span className="text-xs font-bold text-purple-700">
-                  Nächstes: {d.nextTarget.city}
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-4">
-            {/* Bundesland Select */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Bundesland</label>
-              <select
-                value={selectedBundesland}
-                onChange={(e) => setSelectedBundesland(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all appearance-none cursor-pointer"
-              >
-                <option value="">— Bundesland wählen —</option>
-                {bundeslaender.map((bl, i) => (
-                  <option key={i} value={bl.name}>{bl.name} ({bl.Städte?.length || 0} Städte)</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Nische Select */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Branche / Nische</label>
-              <select
-                value={selectedNische}
-                onChange={(e) => setSelectedNische(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all appearance-none cursor-pointer"
-              >
-                {NISCHEN.map((n, i) => (
-                  <option key={i} value={n}>{n}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Buttons */}
-            <div className="flex gap-3 pt-2">
-              <button
-                onClick={handleDiscover}
-                disabled={discovering}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white rounded-xl font-semibold text-sm shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-              >
-                {discovering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                {discovering ? 'Suche läuft...' : 'Suche starten'}
-              </button>
-              <button
-                onClick={handleAutoDiscover}
-                disabled={discovering}
-                className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-purple-300 text-purple-700 rounded-xl font-semibold text-sm hover:bg-purple-50 transition-all disabled:opacity-50"
-                title="Automatisch nächstes Bundesland/Nische"
-              >
-                <Zap className="w-4 h-4" />
-                <span className="hidden sm:inline">Auto</span>
+                {isRunning ? 'Stoppen' : 'Auto-Pilot'}
               </button>
             </div>
           </div>
+
+          {/* Auto-Pilot Live Stats */}
+          {(isRunning || (ap?.stats?.cycleCount ?? 0) > 0) && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
+              <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
+                <p className="text-2xl font-bold text-purple-600">{ap?.stats?.totalDiscovered ?? 0}</p>
+                <p className="text-xs text-gray-500 mt-1">Entdeckt</p>
+              </div>
+              <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
+                <p className="text-2xl font-bold text-green-600">{ap?.stats?.totalSent ?? 0}</p>
+                <p className="text-xs text-gray-500 mt-1">Gesendet</p>
+              </div>
+              <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
+                <p className="text-2xl font-bold text-blue-600">{ap?.stats?.totalFollowUps ?? 0}</p>
+                <p className="text-xs text-gray-500 mt-1">Follow-Ups</p>
+              </div>
+              <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
+                <p className="text-2xl font-bold text-gray-700">{ap?.stats?.cycleCount ?? 0}</p>
+                <p className="text-xs text-gray-500 mt-1">Zyklen</p>
+              </div>
+            </div>
+          )}
 
           {/* Discovery Progress */}
-          <div className="mt-6 pt-6 border-t border-gray-100">
+          <div className="mt-5">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-gray-500">Discovery Fortschritt</span>
+              <span className="text-xs font-medium text-gray-500">Entdeckungsfortschritt</span>
               <span className="text-xs font-bold text-purple-600">{d.currentIndex} / {d.totalCombinations}</span>
             </div>
             <div className="w-full bg-gray-100 rounded-full h-2.5">
@@ -563,12 +476,156 @@ export function OutreachView() {
           </div>
         </div>
 
+        {/* ── Config Panel (Collapsible) ── */}
+        {showConfig && (
+          <div className="border-t border-gray-200 bg-gradient-to-br from-gray-50 to-purple-50/20 p-6">
+            <h4 className="text-sm font-bold text-gray-700 mb-4 flex items-center gap-2">
+              <Settings className="w-4 h-4 text-purple-500" />
+              Auto-Pilot Einstellungen
+              {isRunning && (
+                <span className="text-xs font-normal text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
+                  Stoppe Auto-Pilot um Werte zu ändern
+                </span>
+              )}
+            </h4>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Discovery Intervall</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={5}
+                    max={240}
+                    value={cfgDiscoveryMin}
+                    onChange={(e) => setCfgDiscoveryMin(parseInt(e.target.value) || 30)}
+                    disabled={isRunning}
+                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 disabled:opacity-50 disabled:bg-gray-100"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">Min</span>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Kampagne Intervall</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={10}
+                    max={480}
+                    value={cfgCampaignMin}
+                    onChange={(e) => setCfgCampaignMin(parseInt(e.target.value) || 60)}
+                    disabled={isRunning}
+                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 disabled:opacity-50 disabled:bg-gray-100"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">Min</span>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Follow-Up Intervall</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={60}
+                    max={1440}
+                    value={cfgFollowUpMin}
+                    onChange={(e) => setCfgFollowUpMin(parseInt(e.target.value) || 360)}
+                    disabled={isRunning}
+                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 disabled:opacity-50 disabled:bg-gray-100"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">Min</span>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">E-Mails / Batch</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={cfgMaxEmails}
+                  onChange={(e) => setCfgMaxEmails(parseInt(e.target.value) || 10)}
+                  disabled={isRunning}
+                  className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 disabled:opacity-50 disabled:bg-gray-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Leads / Discovery</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={cfgMaxDiscovery}
+                  onChange={(e) => setCfgMaxDiscovery(parseInt(e.target.value) || 15)}
+                  disabled={isRunning}
+                  className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 disabled:opacity-50 disabled:bg-gray-100"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Manual Controls (Collapsible) ── */}
+        <div className="border-t border-gray-200">
+          <button
+            onClick={() => setManualMode(!manualMode)}
+            className="w-full flex items-center justify-between p-4 bg-white hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Search className="w-4 h-4 text-purple-500" />
+              <span className="text-sm font-bold text-gray-700">Manuelle Suche</span>
+              <span className="text-xs text-gray-400">— Einzelnes Bundesland gezielt durchsuchen</span>
+            </div>
+            <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${manualMode ? 'rotate-180' : ''}`} />
+          </button>
+
+          {manualMode && (
+            <div className="px-6 pb-6 bg-white">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Bundesland</label>
+                  <select
+                    value={selectedBundesland}
+                    onChange={(e) => setSelectedBundesland(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all appearance-none cursor-pointer"
+                  >
+                    <option value="">— Bundesland wählen —</option>
+                    {bundeslaender.map((bl, i) => (
+                      <option key={i} value={bl.name}>{bl.name} ({bl.cities?.length || 0} Städte)</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Branche / Nische</label>
+                  <select
+                    value={selectedNische}
+                    onChange={(e) => setSelectedNische(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all appearance-none cursor-pointer"
+                  >
+                    {NISCHEN.map((n, i) => (
+                      <option key={i} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <button
+                onClick={handleDiscover}
+                disabled={discovering || !selectedBundesland}
+                className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white rounded-xl font-semibold text-sm shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+              >
+                {discovering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                {discovering ? 'Suche läuft...' : `Suche starten — ${selectedBundesland || 'Bundesland wählen'}`}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ═══ E-MAIL-KAMPAGNE ═══ */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Campaign Panel */}
-        <div className="card-premium bg-white p-6 rounded-2xl">
+        <div className="lg:col-span-2 card-premium bg-white p-6 rounded-2xl">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h3 className="text-lg font-bold text-gray-900">📧 E-Mail Kampagne</h3>
-              <p className="text-xs text-gray-500 mt-1">Broschüre an uncontaktierte Leads senden</p>
+              <h3 className="text-lg font-bold text-gray-900">📧 E-Mail-Kampagne</h3>
+              <p className="text-xs text-gray-500 mt-1">Broschüre an unkontaktierte Leads senden</p>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse" />
@@ -576,7 +633,6 @@ export function OutreachView() {
             </div>
           </div>
 
-          {/* Campaign Stats */}
           <div className="grid grid-cols-3 gap-3 mb-6">
             <div className="bg-gradient-to-br from-purple-50 to-purple-100/50 p-4 rounded-xl text-center">
               <MailCheck className="w-5 h-5 text-purple-500 mx-auto mb-2" />
@@ -595,20 +651,6 @@ export function OutreachView() {
             </div>
           </div>
 
-          {/* SMTP Info */}
-          <div className="bg-gray-50 p-4 rounded-xl mb-6 border border-gray-100">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-[#7c3aed] to-[#a78bfa] rounded-lg flex items-center justify-center flex-shrink-0">
-                <Mail className="w-5 h-5 text-white" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-bold text-gray-900">info@partsunion.de</p>
-                <p className="text-xs text-gray-500">via smtp.strato.de • Port 465 (SSL)</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Campaign Button */}
           <button
             onClick={handleStartCampaign}
             disabled={sendingCampaign || o.unsent === 0}
@@ -626,16 +668,53 @@ export function OutreachView() {
               </>
             )}
           </button>
+        </div>
 
-          {o.unsent === 0 && (
-            <p className="text-xs text-gray-400 text-center mt-3">
-              Keine uncontaktierten Leads mit E-Mail. Starte zuerst eine Discovery.
-            </p>
-          )}
+        {/* SMTP Info */}
+        <div className="bg-white p-6 rounded-2xl border border-gray-200">
+          <h3 className="text-sm font-bold text-gray-700 mb-4">SMTP Konfiguration</h3>
+          <div className="space-y-4">
+            <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-[#7c3aed] to-[#a78bfa] rounded-lg flex items-center justify-center flex-shrink-0">
+                  <Mail className="w-5 h-5 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-gray-900">info@partsunion.de</p>
+                  <p className="text-xs text-gray-500">smtp.strato.de • Port 465</p>
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 rounded-xl bg-green-50 border border-green-100 text-center">
+                <CheckCircle className="w-4 h-4 text-green-500 mx-auto mb-1" />
+                <p className="text-xs font-bold text-green-700">SSL Aktiv</p>
+              </div>
+              <div className="p-3 rounded-xl bg-purple-50 border border-purple-100 text-center">
+                <Zap className="w-4 h-4 text-purple-500 mx-auto mb-1" />
+                <p className="text-xs font-bold text-purple-700">Verifiziert</p>
+              </div>
+            </div>
+
+            {/* Niche Distribution */}
+            {d.byNiche.length > 0 && (
+              <div className="pt-3 border-t border-gray-100">
+                <h4 className="text-xs font-bold text-gray-500 mb-3">Nischen-Verteilung</h4>
+                <div className="space-y-2">
+                  {d.byNiche.map((n, i) => (
+                    <div key={i} className="flex items-center justify-between">
+                      <span className="text-xs text-gray-600 truncate">{n.niche}</span>
+                      <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">{n.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Bundesländer Grid */}
+      {/* ═══ BUNDESLÄNDER GRID ═══ */}
       <div className="bg-white p-6 rounded-2xl border border-gray-200">
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -653,7 +732,7 @@ export function OutreachView() {
             return (
               <button
                 key={i}
-                onClick={() => setSelectedBundesland(bl.name)}
+                onClick={() => { setSelectedBundesland(bl.name); setManualMode(true); }}
                 className={`p-4 rounded-xl border text-left transition-all hover:shadow-md hover:scale-[1.02] ${
                   selectedBundesland === bl.name
                     ? 'border-purple-400 bg-gradient-to-br from-purple-50 to-purple-100/50 shadow-md'
@@ -667,7 +746,7 @@ export function OutreachView() {
                   )}
                 </div>
                 <p className="text-sm font-bold text-gray-900 truncate">{bl.name}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{bl.Städte?.length || 0} Städte</p>
+                <p className="text-xs text-gray-400 mt-0.5">{bl.cities?.length || 0} Städte</p>
               </button>
             );
           })}
@@ -681,7 +760,7 @@ export function OutreachView() {
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <div>
                 <h3 className="font-bold text-gray-900">Broschüre Vorschau</h3>
-                <p className="text-xs text-gray-500">PartsUnion Email-Template</p>
+                <p className="text-xs text-gray-500">PartsUnion E-Mail-Vorlage</p>
               </div>
               <button
                 onClick={() => setShowBrochure(false)}
