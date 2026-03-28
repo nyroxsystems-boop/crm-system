@@ -7,17 +7,18 @@ import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
 import { PipelineSettings } from './components/PipelineSettings';
 import { ScraperView } from './components/ScraperView';
-import { LayoutDashboard, Users, Workflow, Settings as SettingsIcon, Sparkles, Menu, X, LogOut, UserCog, Layers, Globe } from 'lucide-react';
+import { OutreachView } from './components/OutreachView';
+import { LayoutDashboard, Users, Workflow, Settings as SettingsIcon, Sparkles, Menu, X, LogOut, UserCog, Layers, Globe, Mail } from 'lucide-react';
 import { isLoggedIn, logout, getCurrentUser } from './utils/storage';
 
 export default function App() {
-  const [activeView, setActiveView] = useState<'dashboard' | 'leads' | 'pipeline' | 'scraper' | 'settings' | 'users' | 'pipelineSettings'>('dashboard');
+  const [activeView, setActiveView] = useState<'dashboard' | 'leads' | 'pipeline' | 'scraper' | 'outreach' | 'settings' | 'users' | 'pipelineSettings'>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [loggedIn, setLoggedIn] = useState(isLoggedIn());
   const currentUser = getCurrentUser();
 
-  const handleNavigate = (view: 'dashboard' | 'leads' | 'pipeline' | 'scraper' | 'settings' | 'users' | 'pipelineSettings') => {
+  const handleNavigate = (view: 'dashboard' | 'leads' | 'pipeline' | 'scraper' | 'outreach' | 'settings' | 'users' | 'pipelineSettings') => {
     setActiveView(view);
     setIsMobileMenuOpen(false);
   };
@@ -148,6 +149,17 @@ export default function App() {
               <Globe className="w-5 h-5 flex-shrink-0" />
               {isSidebarExpanded && <span className="whitespace-nowrap">Scraper</span>}
             </button>
+            <button
+              onClick={() => handleNavigate('outreach')}
+              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'outreach'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
+              title={!isSidebarExpanded ? 'Outreach' : ''}
+            >
+              <Mail className="w-5 h-5 flex-shrink-0" />
+              {isSidebarExpanded && <span className="whitespace-nowrap">Outreach</span>}
+            </button>
 
             {/* Divider */}
             {isSidebarExpanded && (
@@ -244,6 +256,16 @@ export default function App() {
               <Globe className="w-5 h-5" />
               <span>Scraper</span>
             </button>
+            <button
+              onClick={() => handleNavigate('outreach')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'outreach'
+                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
+                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
+                }`}
+            >
+              <Mail className="w-5 h-5" />
+              <span>Outreach</span>
+            </button>
             <div className="pt-4 mt-4 border-t border-gray-200/50">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-4 mb-2">Administration</p>
               <button
@@ -286,6 +308,7 @@ export default function App() {
           {activeView === 'leads' && <LeadsView />}
           {activeView === 'pipeline' && <PipelineView />}
           {activeView === 'scraper' && <ScraperView />}
+          {activeView === 'outreach' && <OutreachView />}
           {activeView === 'settings' && <Settings />}
           {activeView === 'users' && <UserManagement />}
           {activeView === 'pipelineSettings' && <PipelineSettings />}
