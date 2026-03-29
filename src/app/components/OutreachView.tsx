@@ -58,7 +58,8 @@ interface OutreachStats {
 
 interface Bundesland {
   name: string;
-  cities: string[];
+  cities?: string[];
+  Städte?: string[];
 }
 
 const NISCHEN = [
@@ -593,7 +594,7 @@ export function OutreachView() {
                   >
                     <option value="">— Bundesland wählen —</option>
                     {bundeslaender.map((bl, i) => (
-                      <option key={i} value={bl.name}>{bl.name} ({bl.cities?.length || 0} Städte)</option>
+                      <option key={i} value={bl.name}>{bl.name} ({bl.cities?.length || bl.Städte?.length || 0} Städte)</option>
                     ))}
                   </select>
                 </div>
@@ -753,7 +754,7 @@ export function OutreachView() {
                   )}
                 </div>
                 <p className="text-sm font-bold text-gray-900 truncate">{bl.name}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{bl.cities?.length || 0} Städte</p>
+                <p className="text-xs text-gray-400 mt-0.5">{bl.cities?.length || bl.Städte?.length || 0} Städte</p>
               </button>
             );
           })}
