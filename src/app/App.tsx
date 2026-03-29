@@ -6,19 +6,19 @@ import { Settings } from './components/Settings';
 import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
 import { PipelineSettings } from './components/PipelineSettings';
-import { ScraperView } from './components/ScraperView';
+
 import { OutreachView } from './components/OutreachView';
-import { LayoutDashboard, Users, Workflow, Settings as SettingsIcon, Sparkles, Menu, X, LogOut, UserCog, Layers, Globe, Mail } from 'lucide-react';
+import { LayoutDashboard, Users, Workflow, Settings as SettingsIcon, Sparkles, Menu, X, LogOut, UserCog, Layers, Mail } from 'lucide-react';
 import { isLoggedIn, logout, getCurrentUser } from './utils/storage';
 
 export default function App() {
-  const [activeView, setActiveView] = useState<'dashboard' | 'leads' | 'pipeline' | 'scraper' | 'outreach' | 'settings' | 'users' | 'pipelineSettings'>('dashboard');
+  const [activeView, setActiveView] = useState<'dashboard' | 'leads' | 'pipeline' | 'outreach' | 'settings' | 'users' | 'pipelineSettings'>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [loggedIn, setLoggedIn] = useState(isLoggedIn());
   const currentUser = getCurrentUser();
 
-  const handleNavigate = (view: 'dashboard' | 'leads' | 'pipeline' | 'scraper' | 'outreach' | 'settings' | 'users' | 'pipelineSettings') => {
+  const handleNavigate = (view: 'dashboard' | 'leads' | 'pipeline' | 'outreach' | 'settings' | 'users' | 'pipelineSettings') => {
     setActiveView(view);
     setIsMobileMenuOpen(false);
   };
@@ -56,8 +56,8 @@ export default function App() {
                   <Sparkles className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-base md:text-lg font-bold bg-gradient-to-r from-gray-900 via-purple-900 to-gray-900 bg-clip-text text-transparent">Website CRM</h1>
-                  <p className="text-xs text-gray-500 hidden md:block">Premium Edition</p>
+                  <h1 className="text-base md:text-lg font-bold bg-gradient-to-r from-gray-900 via-purple-900 to-gray-900 bg-clip-text text-transparent">PartsUnion CRM</h1>
+                  <p className="text-xs text-gray-500 hidden md:block">Autoteile · Outreach · Pipeline</p>
                 </div>
               </div>
             </div>
@@ -138,17 +138,7 @@ export default function App() {
               <Workflow className="w-5 h-5 flex-shrink-0" />
               {isSidebarExpanded && <span className="whitespace-nowrap">Pipeline</span>}
             </button>
-            <button
-              onClick={() => handleNavigate('scraper')}
-              className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'scraper'
-                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-                }`}
-              title={!isSidebarExpanded ? 'Scraper' : ''}
-            >
-              <Globe className="w-5 h-5 flex-shrink-0" />
-              {isSidebarExpanded && <span className="whitespace-nowrap">Scraper</span>}
-            </button>
+
             <button
               onClick={() => handleNavigate('outreach')}
               className={`w-full flex items-center ${isSidebarExpanded ? 'gap-3' : 'justify-center'} px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'outreach'
@@ -246,16 +236,7 @@ export default function App() {
               <Workflow className="w-5 h-5" />
               <span>Pipeline</span>
             </button>
-            <button
-              onClick={() => handleNavigate('scraper')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'scraper'
-                ? 'bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white shadow-lg shadow-purple-500/30'
-                : 'text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-transparent hover:border-purple-100'
-                }`}
-            >
-              <Globe className="w-5 h-5" />
-              <span>Scraper</span>
-            </button>
+
             <button
               onClick={() => handleNavigate('outreach')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ${activeView === 'outreach'
@@ -307,7 +288,7 @@ export default function App() {
           {activeView === 'dashboard' && <Dashboard />}
           {activeView === 'leads' && <LeadsView />}
           {activeView === 'pipeline' && <PipelineView />}
-          {activeView === 'scraper' && <ScraperView />}
+
           {activeView === 'outreach' && <OutreachView />}
           {activeView === 'settings' && <Settings />}
           {activeView === 'users' && <UserManagement />}
