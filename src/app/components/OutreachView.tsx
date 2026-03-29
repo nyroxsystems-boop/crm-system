@@ -64,11 +64,13 @@ interface Bundesland {
 
 const NISCHEN = [
   'Autoteilehändler',
-  'KFZ-Werkstatt',
+  'Autowerkstatt',
   'Autohaus',
+  'Kfz-Teile Handel',
+  'Autoverwertung',
+  'LKW Teile',
   'Reifenhändler',
-  'Karosserie & Lackierung',
-  'Tuning & Zubehör'
+  'Karosserie Lackierung',
 ];
 
 export function OutreachView() {
