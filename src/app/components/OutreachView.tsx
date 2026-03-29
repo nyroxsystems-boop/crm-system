@@ -266,13 +266,14 @@ export function OutreachView() {
             <button
               onClick={() => loadStats()}
               className="p-2.5 hover:bg-purple-50 rounded-xl transition-colors border border-gray-200"
-              title="Aktualisieren"
+              title="Alle Statistiken und Daten neu laden"
             >
               <RefreshCw className="w-4 h-4 text-gray-600" />
             </button>
             <button
               onClick={openBrochurePreview}
               className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white rounded-xl font-medium text-sm shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 transition-all hover:scale-[1.02]"
+              title="Vorschau der E-Mail-Broschüre anzeigen, die an potenzielle Kunden versendet wird"
             >
               <Eye className="w-4 h-4" />
               <span className="hidden sm:inline">Broschüre</span>
@@ -297,12 +298,12 @@ export function OutreachView() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        <div className="stats-card group animate-scale-in">
+        <div className="stats-card group animate-scale-in" title="Gesamtanzahl aller gefundenen Firmen in der Datenbank — inkl. solche ohne E-Mail-Adresse">
           <div className="flex items-center justify-between mb-4">
             <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
               <Users className="w-6 h-6 text-white" />
             </div>
-            <div className="flex items-center gap-1 px-2 py-1 bg-blue-100 rounded-full">
+            <div className="flex items-center gap-1 px-2 py-1 bg-blue-100 rounded-full" title="Lead-Pool: alle gefundenen Firmen">
               <Globe className="w-3 h-3 text-blue-600" />
               <span className="text-xs font-bold text-blue-600">Pool</span>
             </div>
@@ -320,12 +321,12 @@ export function OutreachView() {
           </div>
         </div>
 
-        <div className="stats-card group animate-scale-in" style={{ animationDelay: '0.1s' }}>
+        <div className="stats-card group animate-scale-in" style={{ animationDelay: '0.1s' }} title="Anzahl der E-Mails die bereits über SMTP (info@partsunion.de) versendet wurden">
           <div className="flex items-center justify-between mb-4">
             <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300 glow-purple">
               <Send className="w-6 h-6 text-white" />
             </div>
-            <div className="flex items-center gap-1 px-2 py-1 bg-purple-100 rounded-full">
+            <div className="flex items-center gap-1 px-2 py-1 bg-purple-100 rounded-full" title="Versand über den SMTP-Server smtp.strato.de">
               <Mail className="w-3 h-3 text-purple-600" />
               <span className="text-xs font-bold text-purple-600">SMTP</span>
             </div>
@@ -335,12 +336,12 @@ export function OutreachView() {
           <p className="text-xs text-gray-400 mt-2">{o.unsent} noch nicht kontaktiert</p>
         </div>
 
-        <div className="stats-card group animate-scale-in" style={{ animationDelay: '0.2s' }}>
+        <div className="stats-card group animate-scale-in" style={{ animationDelay: '0.2s' }} title="Anzahl der Leads die auf unsere E-Mail geantwortet haben — Antwortrate in Prozent">
           <div className="flex items-center justify-between mb-4">
             <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
               <MailOpen className="w-6 h-6 text-white" />
             </div>
-            <div className="flex items-center gap-1 px-2 py-1 bg-green-100 rounded-full">
+            <div className="flex items-center gap-1 px-2 py-1 bg-green-100 rounded-full" title="Antwortrate: wie viel Prozent der kontaktierten Leads haben geantwortet">
               <TrendingUp className="w-3 h-3 text-green-600" />
               <span className="text-xs font-bold text-green-600">{o.sent > 0 ? `${Math.round((o.replied / o.sent) * 100)}%` : '0%'}</span>
             </div>
@@ -349,12 +350,12 @@ export function OutreachView() {
           <p className="text-sm font-medium text-gray-500">Antworten</p>
         </div>
 
-        <div className="stats-card group animate-scale-in" style={{ animationDelay: '0.3s' }}>
+        <div className="stats-card group animate-scale-in" style={{ animationDelay: '0.3s' }} title="Leads die tatsächlich zu Kunden konvertiert wurden — Konversionsrate in Prozent">
           <div className="flex items-center justify-between mb-4">
             <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
               <Target className="w-6 h-6 text-white" />
             </div>
-            <div className="flex items-center gap-1 px-2 py-1 bg-orange-100 rounded-full">
+            <div className="flex items-center gap-1 px-2 py-1 bg-orange-100 rounded-full" title="Konversionsrate: Prozent der angeschriebenen Leads die Kunden wurden">
               <Zap className="w-3 h-3 text-orange-600" />
               <span className="text-xs font-bold text-orange-600">{o.conversionRate}%</span>
             </div>
@@ -412,7 +413,7 @@ export function OutreachView() {
                 className={`p-2.5 rounded-xl border transition-all ${
                   showConfig ? 'bg-purple-50 border-purple-300 text-purple-600' : 'border-gray-200 text-gray-500 hover:bg-gray-50'
                 }`}
-                title="Einstellungen"
+                title="Auto-Pilot Einstellungen öffnen: Intervalle, Batch-Größen und Limits anpassen"
               >
                 <Settings className="w-4 h-4" />
               </button>
@@ -426,6 +427,10 @@ export function OutreachView() {
                     ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-red-500/30 hover:shadow-red-500/50'
                     : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-green-500/30 hover:shadow-green-500/50'
                 }`}
+                title={isRunning
+                  ? 'Auto-Pilot stoppen — laufende Suche und E-Mail-Versand werden beendet'
+                  : 'Auto-Pilot starten — sucht automatisch Leads und verschickt E-Mails nach den eingestellten Intervallen'
+                }
               >
                 {togglingAutoPilot ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -442,19 +447,19 @@ export function OutreachView() {
           {/* Auto-Pilot Live Stats */}
           {(isRunning || (ap?.stats?.cycleCount ?? 0) > 0) && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
-              <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
+              <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center" title="Anzahl der Leads die der Auto-Pilot in dieser Sitzung automatisch gefunden hat">
                 <p className="text-2xl font-bold text-purple-600">{ap?.stats?.totalDiscovered ?? 0}</p>
                 <p className="text-xs text-gray-500 mt-1">Entdeckt</p>
               </div>
-              <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
+              <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center" title="Anzahl der E-Mails die der Auto-Pilot in dieser Sitzung automatisch versendet hat">
                 <p className="text-2xl font-bold text-green-600">{ap?.stats?.totalSent ?? 0}</p>
                 <p className="text-xs text-gray-500 mt-1">Gesendet</p>
               </div>
-              <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
+              <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center" title="Anzahl der Nachfass-E-Mails an Leads die nicht geantwortet haben">
                 <p className="text-2xl font-bold text-blue-600">{ap?.stats?.totalFollowUps ?? 0}</p>
                 <p className="text-xs text-gray-500 mt-1">Follow-Ups</p>
               </div>
-              <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center">
+              <div className="bg-white/80 p-3 rounded-xl border border-gray-100 text-center" title="Wie oft der Auto-Pilot einen kompletten Discovery-Durchlauf gemacht hat">
                 <p className="text-2xl font-bold text-gray-700">{ap?.stats?.cycleCount ?? 0}</p>
                 <p className="text-xs text-gray-500 mt-1">Zyklen</p>
               </div>
@@ -489,7 +494,7 @@ export function OutreachView() {
               )}
             </h4>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-              <div>
+              <div title="Wie oft der Auto-Pilot automatisch nach neuen Leads sucht (in Minuten)">
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">Discovery Intervall</label>
                 <div className="relative">
                   <input
@@ -504,7 +509,7 @@ export function OutreachView() {
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">Min</span>
                 </div>
               </div>
-              <div>
+              <div title="Wie oft der Auto-Pilot automatisch E-Mails an neue Leads verschickt (in Minuten)">
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">Kampagne Intervall</label>
                 <div className="relative">
                   <input
@@ -519,7 +524,7 @@ export function OutreachView() {
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">Min</span>
                 </div>
               </div>
-              <div>
+              <div title="Wie oft der Auto-Pilot Nachfass-E-Mails an Leads schickt, die noch nicht geantwortet haben (in Minuten)">
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">Follow-Up Intervall</label>
                 <div className="relative">
                   <input
@@ -534,7 +539,7 @@ export function OutreachView() {
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">Min</span>
                 </div>
               </div>
-              <div>
+              <div title="Maximale Anzahl E-Mails die pro Kampagnen-Durchlauf auf einmal versendet werden">
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">E-Mails / Batch</label>
                 <input
                   type="number"
@@ -546,7 +551,7 @@ export function OutreachView() {
                   className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 disabled:opacity-50 disabled:bg-gray-100"
                 />
               </div>
-              <div>
+              <div title="Maximale Anzahl neuer Leads die pro Discovery-Durchlauf gesucht werden">
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">Leads / Discovery</label>
                 <input
                   type="number"
@@ -609,6 +614,7 @@ export function OutreachView() {
                 onClick={handleDiscover}
                 disabled={discovering || !selectedBundesland}
                 className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] text-white rounded-xl font-semibold text-sm shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                title="Einmalig manuell nach Leads in dem ausgewählten Bundesland und der Branche suchen"
               >
                 {discovering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
                 {discovering ? 'Suche läuft...' : `Suche starten — ${selectedBundesland || 'Bundesland wählen'}`}
@@ -634,17 +640,17 @@ export function OutreachView() {
           </div>
 
           <div className="grid grid-cols-3 gap-3 mb-6">
-            <div className="bg-gradient-to-br from-purple-50 to-purple-100/50 p-4 rounded-xl text-center">
+            <div className="bg-gradient-to-br from-purple-50 to-purple-100/50 p-4 rounded-xl text-center" title="Leads mit E-Mail die noch keine Broschüre erhalten haben — bereit zum Versand">
               <MailCheck className="w-5 h-5 text-purple-500 mx-auto mb-2" />
               <p className="text-2xl font-bold text-gray-900">{o.unsent}</p>
               <p className="text-xs text-gray-500">Warteschlange</p>
             </div>
-            <div className="bg-gradient-to-br from-green-50 to-green-100/50 p-4 rounded-xl text-center">
+            <div className="bg-gradient-to-br from-green-50 to-green-100/50 p-4 rounded-xl text-center" title="Leads an die bereits eine Broschüre per E-Mail versendet wurde">
               <Send className="w-5 h-5 text-green-500 mx-auto mb-2" />
               <p className="text-2xl font-bold text-gray-900">{o.sent}</p>
               <p className="text-xs text-gray-500">Versendet</p>
             </div>
-            <div className="bg-gradient-to-br from-orange-50 to-orange-100/50 p-4 rounded-xl text-center">
+            <div className="bg-gradient-to-br from-orange-50 to-orange-100/50 p-4 rounded-xl text-center" title="Leads die auf unsere E-Mail reagiert und geantwortet haben">
               <MailOpen className="w-5 h-5 text-orange-500 mx-auto mb-2" />
               <p className="text-2xl font-bold text-gray-900">{o.replied}</p>
               <p className="text-xs text-gray-500">Antworten</p>
@@ -655,6 +661,7 @@ export function OutreachView() {
             onClick={handleStartCampaign}
             disabled={sendingCampaign || o.unsent === 0}
             className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-bold text-base shadow-lg shadow-green-500/30 hover:shadow-green-500/50 transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+            title={`Jetzt manuell ${o.unsent} E-Mails mit der PartsUnion-Broschüre an unkontaktierte Leads versenden`}
           >
             {sendingCampaign ? (
               <>
@@ -686,11 +693,11 @@ export function OutreachView() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 rounded-xl bg-green-50 border border-green-100 text-center">
+              <div className="p-3 rounded-xl bg-green-50 border border-green-100 text-center" title="Verschlüsselte Verbindung zum E-Mail-Server über SSL/TLS auf Port 465">
                 <CheckCircle className="w-4 h-4 text-green-500 mx-auto mb-1" />
                 <p className="text-xs font-bold text-green-700">SSL Aktiv</p>
               </div>
-              <div className="p-3 rounded-xl bg-purple-50 border border-purple-100 text-center">
+              <div className="p-3 rounded-xl bg-purple-50 border border-purple-100 text-center" title="SMTP-Zugangsdaten wurden erfolgreich geprüft — E-Mail-Versand funktioniert">
                 <Zap className="w-4 h-4 text-purple-500 mx-auto mb-1" />
                 <p className="text-xs font-bold text-purple-700">Verifiziert</p>
               </div>
