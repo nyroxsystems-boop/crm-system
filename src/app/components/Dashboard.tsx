@@ -199,7 +199,7 @@ export function Dashboard() {
       {/* Score Distribution */}
       <div className="bg-white p-6 rounded-2xl border border-gray-200">
         <h3 className="text-lg font-bold text-gray-900 mb-4">Score-Verteilung (Leads)</h3>
-        <div className="flex items-end gap-2 h-24">
+        <div className="flex items-end gap-2 h-32 overflow-hidden">
           {scoreDistribution.map((item, i) => (
             <div key={i} className="flex-1 flex flex-col items-center">
               <div
