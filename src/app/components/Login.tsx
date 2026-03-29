@@ -106,7 +106,7 @@ export function Login({ onLogin }: LoginProps) {
 
         {/* Footer */}
         <p className="text-center text-purple-100 text-sm mt-6">
-          © 2024 Händler CRM. Alle Rechte vorbehalten.
+          © 2026 PartsUnion CRM. Alle Rechte vorbehalten.
         </p>
       </div>
     </div>
