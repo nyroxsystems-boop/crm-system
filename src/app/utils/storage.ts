@@ -271,7 +271,7 @@ export async function deleteLead(id: string): Promise<void> {
 }
 
 // Scraper API Functions
-export async function evaluateWebsite(url: string, niche?: string, companyName?: string, city?: string): Promise<any> {
+export async function evaluateWebsite(url: string, niche?: string, companyName?: string, city?: string): Promise<unknown> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/scraper/evaluate`, {
       method: 'POST',

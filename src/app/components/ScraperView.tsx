@@ -123,7 +123,7 @@ export function ScraperView() {
         try {
             const result = await evaluateWebsite(url, niche, undefined, city);
             setResults(prev => [result, ...prev]);
-        } catch (err: any) {
+        } catch (err: unknown) {
             setError(err.message || 'Fehler bei der Bewertung');
         } finally {
             setLoading(false);
@@ -144,7 +144,7 @@ export function ScraperView() {
         try {
             const response = await startScraping(validUrls, niche, city);
             setJobId(response.jobId);
-        } catch (err: any) {
+        } catch (err: unknown) {
             setError(err.message || 'Fehler beim Starten des Scrapings');
             setLoading(false);
         }
@@ -164,7 +164,7 @@ export function ScraperView() {
         try {
             const response = await startRadiusSearch(radiusLocation, radiusKm, niche, scoreThreshold);
             setJobId(response.jobId);
-        } catch (err: any) {
+        } catch (err: unknown) {
             setError(err.message || 'Fehler bei der Umkreissuche');
             setLoading(false);
         }

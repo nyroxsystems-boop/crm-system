@@ -3,7 +3,7 @@ import { X, Upload, Download, AlertCircle, CheckCircle, FileText } from 'lucide-
 
 interface ImportModalProps {
   onClose: () => void;
-  onImport: (data: any[]) => void;
+  onImport: (data: unknown[]) => void;
 }
 
 export function ImportModal({ onClose, onImport }: ImportModalProps) {
@@ -42,7 +42,7 @@ export function ImportModal({ onClose, onImport }: ImportModalProps) {
 
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(',').map(v => v.trim());
-      const obj: any = {};
+      const obj: unknown = {};
       
       headers.forEach((header, index) => {
         obj[header] = values[index] || '';
