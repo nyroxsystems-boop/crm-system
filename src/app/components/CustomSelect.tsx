@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
+import { cn } from './ui/utils';
 
 interface CustomSelectProps {
   value: string;
@@ -7,9 +8,17 @@ interface CustomSelectProps {
   options: string[];
   placeholder?: string;
   className?: string;
+  disabled?: boolean;
 }
 
-export function CustomSelect({ value, onChange, options, placeholder = 'Auswählen...', className = '' }: CustomSelectProps) {
+export function CustomSelect({
+  value,
+  onChange,
+  options,
+  placeholder = 'Auswählen…',
+  className = '',
+  disabled = false,
+}: CustomSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -19,7 +28,6 @@ export function CustomSelect({ value, onChange, options, placeholder = 'Auswähl
         setIsOpen(false);
       }
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
@@ -30,36 +38,45 @@ export function CustomSelect({ value, onChange, options, placeholder = 'Auswähl
   };
 
   return (
-    <div ref={containerRef} className={`relative ${className}`}>
+    <div ref={containerRef} className={cn('relative', className)}>
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl hover:border-[#7c3aed] transition-all duration-200 flex items-center justify-between group focus:outline-none focus:ring-2 focus:ring-[#7c3aed] focus:ring-opacity-20"
+        disabled={disabled}
+        onClick={() => setIsOpen((o) => !o)}
+        className={cn(
+          'flex h-9 w-full items-center justify-between gap-2 rounded-md border border-border-subtle bg-canvas px-3 text-sm transition-colors',
+          'hover:border-border-strong focus:border-accent-500 focus:outline-none',
+          'disabled:cursor-not-allowed disabled:opacity-50',
+        )}
       >
-        <span className={value ? 'text-gray-900' : 'text-gray-400'}>
+        <span className={cn('truncate', value ? 'text-text-primary' : 'text-text-muted')}>
           {value || placeholder}
         </span>
-        <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown
+          className={cn('size-4 shrink-0 text-text-muted transition-transform', isOpen && 'rotate-180')}
+        />
       </button>
 
-      {isOpen && (
-        <div className="absolute z-50 w-full mt-2 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-          <div className="max-h-60 overflow-y-auto py-1">
-            {options.map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => handleSelect(option)}
-                className="w-full px-4 py-2.5 text-left hover:bg-[#f5f3ff] transition-colors duration-150 flex items-center justify-between group"
-              >
-                <span className={value === option ? 'text-[#7c3aed] font-medium' : 'text-gray-700'}>
-                  {option}
-                </span>
-                {value === option && (
-                  <Check className="w-4 h-4 text-[#7c3aed]" />
-                )}
-              </button>
-            ))}
+      {isOpen && !disabled && (
+        <div className="absolute z-50 mt-1.5 w-full overflow-hidden rounded-md border border-border-subtle bg-elevated shadow-modal">
+          <div className="max-h-60 overflow-y-auto p-1">
+            {options.map((option) => {
+              const selected = value === option;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => handleSelect(option)}
+                  className={cn(
+                    'flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors',
+                    selected ? 'bg-accent-500/15 text-accent-500' : 'text-text-secondary hover:bg-elevated-hover hover:text-text-primary',
+                  )}
+                >
+                  <span className="truncate">{option}</span>
+                  {selected && <Check className="size-4 shrink-0" />}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

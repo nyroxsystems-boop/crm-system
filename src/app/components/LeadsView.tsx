@@ -1,489 +1,1190 @@
-import { useState, useEffect } from 'react';
-import { Plus, Search, Filter, MoreVertical, Edit, Trash2, Eye, Download, Mail, Phone, Upload, ArrowUpDown, ArrowUp, ArrowDown, User, Clock, Calendar, Globe, ExternalLink, Star } from 'lucide-react';
-import { getLeads, saveLead, deleteLead, getUsers, type Lead } from '../utils/storage';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import {
+  Plus, Search, Filter, Edit, Trash2, Eye, Download, Mail, Phone, Upload, Clock, Globe,
+  ArrowUp, ArrowDown, ChevronsUpDown, Table2, Columns3, X, Check, ChevronDown, ListPlus, Layers,
+  UserPlus, CalendarClock, Copy,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { sendBrochureBatch } from '../utils/brochure';
+import {
+  getLeads, saveLead, deleteLead, getStatusOptions, type Lead,
+  getLeadLists, createLeadList, deleteLeadList, addLeadsToList, removeLeadsFromList, type LeadList,
+  enrichMissingContacts, getAppointmentAdmins, type AppointmentAdmin,
+} from '../utils/storage';
 import { LeadModal } from './LeadModal';
 import { LeadDetailModal } from './LeadDetailModal';
-import { ImportModal } from './ImportModal';
+import { ImportModal, type ImportedRow } from './ImportModal';
+import { DuplicatesModal } from './DuplicatesModal';
 import { CustomSelect } from './CustomSelect';
+import {
+  Card, PageHeader, StatCard, Button, IconButton, Badge, EmptyState, StatusSelect, PriorityPill,
+  inputClass, scoreTone, statusColor, cn,
+} from './ui-kit';
+import { ARBEITSFLAECHE, KOPF_BEREICH, SPALTE_SCROLLT, VOLLE_HOEHE } from './dichte';
 
-// Score color helper
-const getScoreColor = (score: number | undefined): { bg: string; text: string; label: string } => {
-  if (!score || score === 0) return { bg: 'bg-gray-100', text: 'text-gray-500', label: 'N/A' };
-  if (score >= 70) return { bg: 'bg-red-100', text: 'text-red-700', label: 'Schlecht' };
-  if (score >= 50) return { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Mäßig' };
-  if (score >= 30) return { bg: 'bg-yellow-100', text: 'text-yellow-700', label: 'OK' };
-  return { bg: 'bg-green-100', text: 'text-green-700', label: 'Gut' };
+type SortField = 'company' | 'createdAt' | 'value' | 'updatedAt' | 'lastContact';
+
+/** Sortier-Schnellwahl in der Filterleiste (Label → Feld + Richtung). */
+const SORT_PRESETS: { label: string; field: SortField; dir: 'asc' | 'desc' }[] = [
+  { label: 'Zuletzt aktualisiert', field: 'updatedAt', dir: 'desc' },
+  { label: 'Neueste zuerst', field: 'createdAt', dir: 'desc' },
+  { label: 'Lange kein Kontakt', field: 'lastContact', dir: 'asc' },
+  { label: 'Kürzlich kontaktiert', field: 'lastContact', dir: 'desc' },
+];
+
+/** Letzter Protokoll-Kontakt als Timestamp; nie kontaktiert = 0 (→ „am längsten her"). */
+const lastContactTime = (l: Lead): number => (l.lastContactDate ? new Date(l.lastContactDate).getTime() || 0 : 0);
+
+// Quellen-Ansichten (Filter über leadSource/source) — keine DB-Listen.
+const SOURCE_SEGMENTS: { key: string; label: string; match: (l: Lead) => boolean }[] = [
+  { key: 'all', label: 'Alle', match: () => true },
+  { key: 'src:scraper', label: 'Scraping', match: (l) => l.leadSource === 'scraper' || /scraper/i.test(l.source || '') },
+  { key: 'src:website', label: 'Website', match: (l) => /^website/i.test(l.source || '') },
+  { key: 'src:meta', label: 'Meta', match: (l) => /(meta|whatsapp|instagram|facebook)/i.test(l.source || '') },
+  { key: 'src:google', label: 'Google Ads', match: (l) => /google\s*ads|google-ads/i.test(l.source || '') },
+];
+
+const COUNTRY_LABELS: Record<string, string> = {
+  DE: 'Deutschland', AT: 'Österreich', CH: 'Schweiz', FR: 'Frankreich', PL: 'Polen',
 };
+const countryCode = (value?: string): string => {
+  const v = (value || '').trim().toLowerCase();
+  if (!v) return '';
+  if (v === 'de' || v.includes('deutsch')) return 'DE';
+  if (v === 'at' || v.includes('österreich') || v.includes('oesterreich')) return 'AT';
+  if (v === 'ch' || v.includes('schweiz') || v.includes('suisse')) return 'CH';
+  if (v === 'fr' || v.includes('frank')) return 'FR';
+  if (v === 'pl' || v.includes('polen') || v.includes('polska')) return 'PL';
+  return v.toUpperCase();
+};
+const dealerLabel = (value?: Lead['dealerType']): string =>
+  value === 'gebrauchtteile' || value === 'verwerter' ? 'Gebrauchtteile' : value === 'neuteile' ? 'Neuteile' : 'Nicht eingeordnet';
 
-export function LeadsView() {
+// CSV-Zelle: RFC-4180-Quoting + Schutz gegen Formel-Injection (CSV-Injection).
+// Lead-Daten stammen z.T. aus dem Scraper (fremd-kontrollierbar); ein Feld, das mit
+// = + - @ (oder Tab/CR) beginnt, könnte beim Öffnen in Excel/Sheets als Formel
+// ausgeführt werden. Wir präfixen solche Werte mit einem Apostroph (neutralisiert die
+// Formel) und quoten immer doppelt.
+function csvCell(value: unknown): string {
+  if (value === undefined || value === null) return '""';
+  let s = String(value);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+export function LeadsView({
+  pendingAction = null,
+  onPendingHandled,
+  pendingLeadId = null,
+  onPendingLeadHandled,
+}: {
+  pendingAction?: 'new' | 'import' | null;
+  onPendingHandled?: () => void;
+  /** Lead-Maske direkt öffnen (Sprung aus Kalender/Tagesplan). */
+  pendingLeadId?: string | null;
+  onPendingLeadHandled?: () => void;
+} = {}) {
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [lists, setLists] = useState<LeadList[]>([]);
+  const [activeSeg, setActiveSeg] = useState<string>('all');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [view, setView] = useState<'table' | 'board'>('table');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [assignedToFilter, setAssignedToFilter] = useState<string>('all');
-  const [sortField, setSortField] = useState<'company' | 'createdAt' | 'value' | 'updatedAt'>('updatedAt');
+  const [dealerTypeFilter, setDealerTypeFilter] = useState<string>('all');
+  const [countryFilter, setCountryFilter] = useState<string>('all');
+  const [sortField, setSortField] = useState<SortField>('updatedAt');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [duplicatesOpen, setDuplicatesOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
+  const [enriching, setEnriching] = useState(false);
+  // Echte Admin-Accounts (Fecat/Elias/Bardia/Aaron) für die Lead-Zuteilung —
+  // NICHT die localStorage-„Benutzerverwaltung", sondern die Bot-Admins.
+  const [admins, setAdmins] = useState<AppointmentAdmin[]>([]);
+  // Wiedervorlage-Filter: nur Leads, deren Follow-up heute oder früher fällig ist.
+  const [dueOnly, setDueOnly] = useState(false);
   const [detailLead, setDetailLead] = useState<Lead | null>(null);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  // Ab 1280px öffnet die Lead-Maske als gedocktes Seitenpanel neben der Tabelle,
+  // darunter als klassisches Modal.
+  const [wideScreen, setWideScreen] = useState<boolean>(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1280px)').matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1280px)');
+    const onChange = (e: MediaQueryListEvent) => setWideScreen(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  // Wurde die Stammdaten-Maske AUS dem Aktivitäten-Overlay geöffnet? → Zurück-Pfeil.
+  const [editFromDetail, setEditFromDetail] = useState(false);
+
+  const statuses = getStatusOptions();
 
   useEffect(() => {
     loadLeads();
+    loadLists();
+    getAppointmentAdmins().then(setAdmins);
   }, []);
+
+  useEffect(() => {
+    if (!pendingAction) return;
+    if (pendingAction === 'new') {
+      setEditingLead(null);
+      setEditFromDetail(false);
+      setIsModalOpen(true);
+    } else if (pendingAction === 'import') {
+      setIsImportModalOpen(true);
+    }
+    onPendingHandled?.();
+  }, [pendingAction, onPendingHandled]);
+
+  // Sprung aus Kalender/Tagesplan: sobald die Leads geladen sind, die Maske des
+  // gewünschten Leads öffnen.
+  useEffect(() => {
+    if (!pendingLeadId || leads.length === 0) return;
+    const lead = leads.find((l) => l.id === pendingLeadId);
+    if (lead) setDetailLead(lead);
+    else toast.error('Lead zum Termin wurde nicht gefunden.');
+    onPendingLeadHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingLeadId, leads]);
 
   const loadLeads = async () => {
     const data = await getLeads();
-    setLeads(data);
+    setLeads(Array.isArray(data) ? data : []);
   };
+  const loadLists = async () => setLists(await getLeadLists());
 
   const handleSaveLead = async (lead: Partial<Lead>) => {
     await saveLead(lead);
     await loadLeads();
     setIsModalOpen(false);
     setEditingLead(null);
+    setEditFromDetail(false);
+    toast.success(lead.id ? 'Lead aktualisiert.' : 'Lead erstellt.');
   };
 
   const handleDeleteLead = async (id: string) => {
     if (confirm('Möchten Sie diesen Lead wirklich löschen?')) {
+      setLeads((prev) => prev.filter((l) => l.id !== id));
       await deleteLead(id);
+      toast.success('Lead gelöscht.');
+    }
+  };
+
+  // CSV-Import: jede Zeile wird als echter Lead über die API angelegt (POST
+  // /api/crm/leads). Es werden ALLE gemappten Spalten übernommen (Website, Ort,
+  // Adresse, Notizen, Prio, Typ, Quelle) — nicht nur die vier Kernfelder. Dubletten
+  // gegen die bereits geladenen Leads (gleiche Telefonnummer ODER Firma+Ort) werden
+  // übersprungen statt doppelt angelegt; pro Zeile wird ein Fehler gezählt, statt
+  // den ganzen Import abzubrechen.
+  const normPhone = (p?: string) => (p || '').replace(/\D/g, '').replace(/^0049/, '0').replace(/^49/, '0');
+  const normName = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9äöüß]/g, '');
+
+  const handleImportLeads = async (rows: ImportedRow[]) => {
+    let ok = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+    const seenPhones = new Set(leads.map((l) => normPhone(l.phone)).filter((p) => p.length > 5));
+    const seenNames = new Set(leads.map((l) => `${normName(l.company)}|${normName(l.city)}`));
+    // Prio aus Anruflisten (1–4) auf CRM-Prioritäten mappen; Textwerte durchreichen.
+    const mapPriority = (p?: string): string | undefined => {
+      const v = (p || '').trim();
+      if (!v) return undefined;
+      if (/^1$/.test(v)) return 'Hoch';
+      if (/^2$/.test(v)) return 'Mittel';
+      if (/^[34]$/.test(v)) return 'Niedrig';
+      return v;
+    };
+    for (const row of rows) {
+      const company = (row.company || '').trim();
+      if (!company) { errors.push('Zeile ohne Firmenname übersprungen.'); continue; }
+      const phoneKey = normPhone(row.phone);
+      const nameKey = `${normName(company)}|${normName(row.city)}`;
+      if ((phoneKey.length > 5 && seenPhones.has(phoneKey)) || seenNames.has(nameKey)) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        // Straße + PLZ in EIN Adressfeld (der Lead hat city separat).
+        const address = [row.address, row.plz].filter(Boolean).join(', ');
+        await saveLead({
+          company,
+          contactPerson: (row.contactPerson || '').trim(),
+          email: (row.email || '').trim(),
+          phone: (row.phone || '').trim() || undefined,
+          website: (row.website || '').trim() || undefined,
+          city: (row.city || '').trim() || undefined,
+          region: (row.region || '').trim() || undefined,
+          country: (row.country || '').trim() || undefined,
+          address: address || undefined,
+          notes: (row.notes || '').trim() || undefined,
+          priority: mapPriority(row.priority),
+          niche: (row.niche || '').trim() || undefined,
+          tags: row.niche ? [row.niche.trim()] : undefined,
+          status: (row.status || '').trim() || 'Neu',
+          source: (row.source || '').trim() || 'CSV-Import',
+        });
+        ok += 1;
+        if (phoneKey.length > 5) seenPhones.add(phoneKey);
+        seenNames.add(nameKey);
+      } catch (e: any) {
+        errors.push(`„${company}": ${e?.message || 'Fehler'}`);
+      }
+    }
+    await loadLeads();
+    if (ok > 0) toast.success(`${ok} Lead(s) importiert${skipped > 0 ? `, ${skipped} übersprungen (bereits vorhanden)` : ''}.`);
+    else if (skipped > 0) toast.success(`Nichts zu tun — alle ${skipped} Lead(s) sind bereits vorhanden.`);
+    if (errors.length > 0) {
+      toast.error(`${errors.length} Zeile(n) fehlgeschlagen.`);
+      console.warn('Lead-Import-Fehler:', errors);
+    }
+  };
+
+  // Bestands-Backfill: Leads mit Website aber ohne Telefonnummer über den Scraper
+  // (Impressum/Kontaktseite) anreichern. Batchweise Schleife, bis der Server
+  // remaining=0 meldet — mit Zwischenstand-Toasts, weil das je nach Bestand
+  // mehrere Minuten crawlt. MAX_ROUNDS ist die Notbremse gegen Endlosschleifen.
+  const handleEnrichMissing = async () => {
+    if (enriching) return;
+    setEnriching(true);
+    const MAX_ROUNDS = 60;
+    let phones = 0;
+    let emails = 0;
+    try {
+      for (let round = 1; round <= MAX_ROUNDS; round++) {
+        const r = await enrichMissingContacts(25);
+        phones += r.phonesFound;
+        emails += r.emailsFound;
+        if (r.checked === 0 || r.remaining <= 0) break;
+        toast.info(`Nummern nachziehen läuft… ${phones} gefunden, noch ${r.remaining} Lead(s) offen.`);
+      }
       await loadLeads();
-      setOpenMenuId(null);
+      toast.success(`Fertig: ${phones} Telefonnummer(n) und ${emails} E-Mail(s) ergänzt.`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Anreicherung fehlgeschlagen.');
+    } finally {
+      setEnriching(false);
     }
   };
 
   const handleEditClick = (lead: Lead) => {
     setEditingLead(lead);
+    setEditFromDetail(false);
     setIsModalOpen(true);
-    setOpenMenuId(null);
   };
 
-  const handleSort = (field: typeof sortField) => {
-    if (sortField === field) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDirection('desc');
+  const changeStatus = async (lead: Lead, status: string) => {
+    setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, status } : l)));
+    try {
+      await saveLead({ ...lead, status });
+    } catch { /* optimistic */ }
+  };
+
+  const quickAdd = async (company: string, status = 'Neu') => {
+    const c = company.trim();
+    if (!c) return;
+    const now = new Date().toISOString();
+    const optimistic: Lead = {
+      id: `tmp-${Date.now()}`, company: c, contactPerson: '', email: '', status,
+      source: 'Manuell', priority: 'Mittel', value: 0, tags: [], createdAt: now, updatedAt: now,
+    };
+    setLeads((prev) => [optimistic, ...prev]);
+    toast.success(`„${c}" hinzugefügt.`);
+    try {
+      await saveLead({ company: c, status, source: 'Manuell' });
+      await loadLeads();
+    } catch { /* optimistic */ }
+  };
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    else { setSortField(field); setSortDirection('desc'); }
+  };
+
+  // Benutzer-Filter: echte Admin-Accounts zuerst, dann evtl. Alt-Werte aus Leads,
+  // die keinem Admin (mehr) entsprechen, plus „Nicht zugewiesen".
+  const adminNames = admins.map((a) => a.username);
+  const legacyAssignees = Array.from(new Set(leads.map((l) => l.assignedTo).filter(Boolean))).filter(
+    (n) => !adminNames.includes(n as string),
+  ) as string[];
+  const assignedUsers = ['Alle Benutzer', ...adminNames, ...legacyAssignees, 'Nicht zugewiesen'];
+
+  /** Follow-up heute oder überfällig? (nextFollowUpDate ist "YYYY-MM-DD") */
+  const isDue = (l: Lead): boolean => {
+    if (!l.nextFollowUpDate) return false;
+    return l.nextFollowUpDate.slice(0, 10) <= new Date().toISOString().slice(0, 10);
+  };
+  const dueCount = leads.filter(isDue).length;
+
+  // Segment-Match (Quelle ODER eigene Liste).
+  const segMatch = useMemo(() => {
+    if (activeSeg.startsWith('list:')) {
+      const id = activeSeg.slice(5);
+      return (l: Lead) => (l.listIds || []).includes(id);
     }
-  };
-
-  // Get unique users for filter
-  const users = getUsers();
-  const assignedUsers = ['Alle Benutzer', ...Array.from(new Set(leads.map(l => l.assignedTo).filter(Boolean)))];
+    const src = SOURCE_SEGMENTS.find((s) => s.key === activeSeg) || SOURCE_SEGMENTS[0];
+    return src.match;
+  }, [activeSeg]);
 
   const filteredLeads = leads
     .filter((lead) => {
+      if (!segMatch(lead)) return false;
       const matchesSearch =
         lead.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
         lead.contactPerson.toLowerCase().includes(searchTerm.toLowerCase()) ||
         lead.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (lead.phone && lead.phone.toLowerCase().includes(searchTerm.toLowerCase()));
-
       const matchesStatus = statusFilter === 'all' || lead.status === statusFilter;
       const matchesPriority = priorityFilter === 'all' || lead.priority === priorityFilter;
-      const matchesAssignedTo = assignedToFilter === 'all' || lead.assignedTo === assignedToFilter;
-
-      return matchesSearch && matchesStatus && matchesPriority && matchesAssignedTo;
+      const matchesAssignedTo =
+        assignedToFilter === 'all' ||
+        (assignedToFilter === 'Nicht zugewiesen' ? !lead.assignedTo : lead.assignedTo === assignedToFilter);
+      const matchesDealerType = dealerTypeFilter === 'all'
+        || (dealerTypeFilter === 'unclassified' && !lead.dealerType)
+        || (dealerTypeFilter === 'gebrauchtteile'
+          ? lead.dealerType === 'gebrauchtteile' || lead.dealerType === 'verwerter'
+          : lead.dealerType === dealerTypeFilter);
+      const matchesCountry = countryFilter === 'all' || countryCode(lead.country) === countryFilter;
+      const matchesDue = !dueOnly || isDue(lead);
+      return matchesSearch && matchesStatus && matchesPriority && matchesAssignedTo
+        && matchesDealerType && matchesCountry && matchesDue;
     })
     .sort((a, b) => {
-      let comparison = 0;
-
-      if (sortField === 'company') {
-        comparison = a.company.localeCompare(b.company);
-      } else if (sortField === 'createdAt') {
-        comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      } else if (sortField === 'updatedAt') {
-        comparison = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
-      } else if (sortField === 'value') {
-        comparison = (a.value || 0) - (b.value || 0);
-      }
-
-      return sortDirection === 'asc' ? comparison : -comparison;
+      let c = 0;
+      if (sortField === 'company') c = a.company.localeCompare(b.company);
+      else if (sortField === 'createdAt') c = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      else if (sortField === 'updatedAt') c = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+      else if (sortField === 'value') c = (a.value || 0) - (b.value || 0);
+      else if (sortField === 'lastContact') c = lastContactTime(a) - lastContactTime(b);
+      return sortDirection === 'asc' ? c : -c;
     });
 
-  const formatRelativeTime = (date: string) => {
-    const now = new Date();
-    const then = new Date(date);
-    const seconds = Math.floor((now.getTime() - then.getTime()) / 1000);
+  // Segment-Counts (über alle Leads).
+  const segCount = (key: string): number => {
+    if (key.startsWith('list:')) { const id = key.slice(5); return leads.filter((l) => (l.listIds || []).includes(id)).length; }
+    const s = SOURCE_SEGMENTS.find((x) => x.key === key); return s ? leads.filter(s.match).length : 0;
+  };
 
+  // ── Selection ──
+  // Bei gedocktem Lead-Panel wird die Tabelle schmal → nur Kernspalten zeigen
+  // (Firma/Status/Letzter Kontakt), damit KEIN horizontaler Scroll entsteht.
+  const compact = wideScreen && !!detailLead;
+  const visibleIds = filteredLeads.map((l) => l.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const toggleOne = (id: string) => setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleAllVisible = () => setSelected((prev) => {
+    const n = new Set(prev);
+    if (allVisibleSelected) visibleIds.forEach((id) => n.delete(id));
+    else visibleIds.forEach((id) => n.add(id));
+    return n;
+  });
+  const clearSelection = () => setSelected(new Set());
+  const selectedRealIds = [...selected].filter((id) => !id.startsWith('tmp-'));
+
+  const assignToList = async (listId: string) => {
+    if (!selectedRealIds.length) return;
+    try {
+      await addLeadsToList(listId, selectedRealIds);
+      toast.success(`${selectedRealIds.length} Lead(s) zur Liste hinzugefügt.`);
+      clearSelection();
+      await Promise.all([loadLeads(), loadLists()]);
+    } catch (e: any) { toast.error(e.message || 'Zuordnung fehlgeschlagen'); }
+  };
+  const createAndAssign = async (name: string) => {
+    try {
+      const list = await createLeadList(name);
+      if (list) { await loadLists(); if (selectedRealIds.length) await assignToList(list.id); else { toast.success(`Liste „${name}" erstellt.`); } }
+    } catch (e: any) { toast.error(e.message || 'Liste konnte nicht erstellt werden'); }
+  };
+  const removeFromCurrentList = async () => {
+    if (!activeSeg.startsWith('list:') || !selectedRealIds.length) return;
+    const id = activeSeg.slice(5);
+    try {
+      await removeLeadsFromList(id, selectedRealIds);
+      toast.success(`${selectedRealIds.length} Lead(s) aus der Liste entfernt.`);
+      clearSelection();
+      await Promise.all([loadLeads(), loadLists()]);
+    } catch (e: any) { toast.error(e.message || 'Entfernen fehlgeschlagen'); }
+  };
+  // Bulk-Zuteilung: ausgewählte Leads einem echten Admin-Account zuweisen
+  // (username=null → Zuweisung entfernen). PATCH pro Lead schreibt NUR assignedTo
+  // (Metadata-Merge im Backend — kein Klobbern anderer Felder).
+  const bulkAssignUser = async (username: string | null) => {
+    if (!selectedRealIds.length) return;
+    const val = username || '';
+    setLeads((prev) => prev.map((l) => (selected.has(l.id) ? { ...l, assignedTo: val } : l)));
+    try {
+      await Promise.all(selectedRealIds.map((id) => saveLead({ id, assignedTo: val })));
+      toast.success(
+        username
+          ? `${selectedRealIds.length} Lead(s) an ${username} zugewiesen.`
+          : `Zuweisung bei ${selectedRealIds.length} Lead(s) entfernt.`,
+      );
+      clearSelection();
+      await loadLeads();
+    } catch (e: any) {
+      toast.error(e?.message || 'Zuweisung fehlgeschlagen');
+      await loadLeads();
+    }
+  };
+
+  /**
+   * Broschüre an die ausgewählten Leads.
+   *
+   * Bewusst mit Rückfrage und Zahlen: ein Sammelversand an die falsche Auswahl
+   * lässt sich nicht zurückholen. Genannt wird auch, wie viele Leads gar keine
+   * Adresse haben — sonst wundert man sich hinterher über die Differenz.
+   */
+  const [brochureBusy, setBrochureBusy] = useState(false);
+  const sendBrochures = async () => {
+    const ziel = leads.filter((l) => selected.has(l.id));
+    if (!ziel.length) return;
+    const frage = `E-Mail-Adresse bei ${ziel.length} Lead(s) prüfen und die Broschüre senden?`
+      + '\n\nNeben dem E-Mail-Feld werden auch Lead-Notizen und Protokolle geprüft.'
+      + '\n\nNur an Empfänger senden, die nach Unterlagen gefragt haben.';
+    if (!confirm(frage)) return;
+
+    setBrochureBusy(true);
+    const toastId = toast.loading(`Prüfe und sende 0/${ziel.length}…`);
+    try {
+      const r = await sendBrochureBatch(ziel, (fertig, gesamt) => {
+        toast.loading(`Sende ${fertig}/${gesamt}…`, { id: toastId });
+      });
+      if (r.fehler.length === 0) {
+        toast.success(`${r.gesendet} Broschüre(n) versendet.`, { id: toastId });
+      } else {
+        toast.error(
+          `${r.gesendet} versendet, ${r.fehler.length} fehlgeschlagen: `
+          + r.fehler.slice(0, 3).map((f) => f.lead).join(', ')
+          + (r.fehler.length > 3 ? ' …' : ''),
+          { id: toastId, duration: 10000 },
+        );
+      }
+      clearSelection();
+      await loadLeads();
+    } catch (e: any) {
+      toast.error(e?.message || 'Versand fehlgeschlagen', { id: toastId });
+    } finally {
+      setBrochureBusy(false);
+    }
+  };
+
+  const bulkDelete = async () => {
+    if (!selectedRealIds.length) return;
+    if (!confirm(`${selectedRealIds.length} Lead(s) wirklich löschen?`)) return;
+    setLeads((prev) => prev.filter((l) => !selected.has(l.id)));
+    clearSelection();
+    await Promise.all(selectedRealIds.map((id) => deleteLead(id)));
+    toast.success('Leads gelöscht.');
+    await loadLeads();
+  };
+  const handleDeleteList = async (id: string, name: string) => {
+    if (!confirm(`Liste „${name}" löschen? Die Leads selbst bleiben erhalten.`)) return;
+    await deleteLeadList(id);
+    if (activeSeg === `list:${id}`) setActiveSeg('all');
+    await Promise.all([loadLists(), loadLeads()]);
+    toast.success(`Liste „${name}" gelöscht.`);
+  };
+
+  // CSV-Export der aktuell gefilterten Leads (rein client-seitig, kein Backend).
+  // Exportiert genau die sichtbare Auswahl (Segment + Suche + Filter), damit der
+  // Export der Ansicht entspricht.
+  const exportCsv = () => {
+    if (filteredLeads.length === 0) {
+      toast.error('Keine Leads zum Exportieren.');
+      return;
+    }
+    const cols: { header: string; value: (l: Lead) => string | number | undefined }[] = [
+      { header: 'Firma', value: (l) => l.company },
+      { header: 'Kontakt', value: (l) => l.contactPerson },
+      { header: 'E-Mail', value: (l) => l.email },
+      { header: 'Telefon', value: (l) => l.phone },
+      { header: 'Website', value: (l) => l.website || l.websiteUrl },
+      { header: 'Branche', value: (l) => l.industry || l.niche },
+      { header: 'Stadt', value: (l) => l.city },
+      { header: 'Region', value: (l) => l.region },
+      { header: 'Land', value: (l) => l.country },
+      { header: 'Händlerart', value: (l) => dealerLabel(l.dealerType) },
+      { header: 'Status', value: (l) => l.status },
+      { header: 'Quelle', value: (l) => l.source },
+      { header: 'Priorität', value: (l) => l.priority },
+      { header: 'Wert', value: (l) => l.value },
+      { header: 'Score', value: (l) => l.designScore ?? l.leadScore },
+      { header: 'Zugewiesen', value: (l) => l.assignedTo },
+      { header: 'Erstellt', value: (l) => l.createdAt },
+      { header: 'Aktualisiert', value: (l) => l.updatedAt },
+    ];
+    const csv = [
+      cols.map((c) => csvCell(c.header)).join(','),
+      ...filteredLeads.map((l) => cols.map((c) => csvCell(c.value(l))).join(',')),
+    ].join('\r\n');
+    // BOM → Excel erkennt UTF-8 (Umlaute korrekt).
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast.success(`${filteredLeads.length} Lead(s) als CSV exportiert.`);
+  };
+
+  const formatRelativeTime = (date: string) => {
+    const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
     if (seconds < 60) return 'Gerade eben';
     if (seconds < 3600) return `vor ${Math.floor(seconds / 60)}m`;
     if (seconds < 86400) return `vor ${Math.floor(seconds / 3600)}h`;
     if (seconds < 604800) return `vor ${Math.floor(seconds / 86400)}d`;
-    return then.toLocaleDateString('de-DE');
+    return new Date(date).toLocaleDateString('de-DE');
   };
-
-  const statusColors: Record<string, string> = {
-    'Neu': 'bg-blue-100 text-blue-700',
-    'Qualifiziert': 'bg-green-100 text-green-700',
-    'Angebot': 'bg-yellow-100 text-yellow-700',
-    'Verhandlung': 'bg-orange-100 text-orange-700',
-    'Gewonnen': 'bg-emerald-100 text-emerald-700',
-    'Verloren': 'bg-red-100 text-red-700',
-  };
-
-  const priorityColors: Record<string, string> = {
-    'Hoch': 'bg-red-100 text-red-700',
-    'Mittel': 'bg-yellow-100 text-yellow-700',
-    'Niedrig': 'bg-green-100 text-green-700',
-  };
+  const stripUrl = (u: string) => u.replace(/^https?:\/\//, '').replace(/\/$/, '');
 
   return (
-    <div className="p-4 md:p-6 space-y-4 md:space-y-5">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="text-xl md:text-2xl font-bold text-gray-900">Leads</h2>
-          <p className="text-gray-500 mt-1 text-sm">Verwalten Sie Ihre Leads und Kontakte</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-2 px-3 py-2 text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-sm"
-          >
-            <Upload className="w-4 h-4" />
-            <span className="hidden sm:inline">Importieren</span>
-          </button>
-          <button className="flex items-center gap-2 px-3 py-2 text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-sm">
-            <Download className="w-4 h-4" />
-            <span className="hidden sm:inline">Export</span>
-          </button>
-          <button
-            onClick={() => {
-              setEditingLead(null);
-              setIsModalOpen(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-[#7c3aed] text-white rounded-lg hover:bg-[#6d28d9] transition-colors text-sm font-medium"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Neuer Lead</span>
-            <span className="sm:hidden">Neu</span>
-          </button>
-        </div>
-      </div>
+    <div className={VOLLE_HOEHE}>
+      {/* Kopf: bleibt stehen, ueber BEIDEN Spalten.
+          Die Kennzahlen sind weiter unten in die Listenspalte gewandert und
+          scrollen mit ihr weg — fest im Kopf kosteten sie rund 80 px, die auf
+          einem 13-Zoll-Bildschirm der Arbeitsflaeche fehlen, und waehrend man
+          einen Lead bearbeitet braucht man sie nicht.
+          Der Titelblock steht dagegen bewusst HIER und nicht in der Spalte.
+          Dort hatte er nur die Breite der Liste, die Knoepfe nahmen sie fast
+          ganz ein, und der Untertitel stand mit einem Wort pro Zeile
+          untereinander. Ueber die volle Breite passt alles in eine Zeile. */}
+      <div className={cn(KOPF_BEREICH, 'mx-auto w-full max-w-[1620px] space-y-3.5')}>
+      <PageHeader
+        title="Leads"
+        subtitle="Verwalten Sie Ihre Leads, Quellen und eigenen Listen."
+        actions={
+          <>
+            <Button variant="secondary" onClick={handleEnrichMissing} disabled={enriching}>
+              <Phone className={cn('size-4', enriching && 'animate-pulse')} />
+              <span className="hidden sm:inline">{enriching ? 'Ziehe Nummern…' : 'Nummern nachziehen'}</span>
+            </Button>
+            <Button variant="secondary" onClick={() => setDuplicatesOpen(true)}>
+              <Copy className="size-4" /><span className="hidden sm:inline">Dubletten</span>
+            </Button>
+            <Button variant="secondary" onClick={() => setIsImportModalOpen(true)}>
+              <Upload className="size-4" /><span className="hidden sm:inline">Importieren</span>
+            </Button>
+            <Button variant="secondary" onClick={exportCsv}><Download className="size-4" /><span className="hidden sm:inline">Export</span></Button>
+            <Button onClick={() => { setEditingLead(null); setEditFromDetail(false); setIsModalOpen(true); }}>
+              <Plus className="size-4" /><span className="hidden sm:inline">Neuer Lead</span><span className="sm:hidden">Neu</span>
+            </Button>
+          </>
+        }
+      />
 
-      {/* Stats Bar */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-white p-4 rounded-lg border border-gray-200">
-          <p className="text-xs text-gray-500 font-medium">Alle Leads</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{leads.length}</p>
-        </div>
-        <div className="bg-white p-4 rounded-lg border border-gray-200">
-          <p className="text-xs text-gray-500 font-medium">Qualifiziert</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">
-            {leads.filter(l => l.status === 'Qualifiziert').length}
-          </p>
-        </div>
-        <div className="bg-white p-4 rounded-lg border border-gray-200">
-          <p className="text-xs text-gray-500 font-medium">Verhandlung</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">
-            {leads.filter(l => l.status === 'Verhandlung').length}
-          </p>
-        </div>
-        <div className="bg-white p-4 rounded-lg border border-gray-200">
-          <p className="text-xs text-gray-500 font-medium">Gewonnen</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">
-            {leads.filter(l => l.status === 'Gewonnen').length}
-          </p>
-        </div>
-      </div>
+      {/* Lead-Listen-Leiste (Quellen + eigene Listen) */}
+      <SegmentBar
+        active={activeSeg}
+        onSelect={(k) => { setActiveSeg(k); clearSelection(); }}
+        lists={lists}
+        segCount={segCount}
+        onCreate={createAndAssign}
+        onDeleteList={handleDeleteList}
+      />
 
-      {/* Filters */}
-      <div className="bg-white p-4 rounded-lg border border-gray-200">
-        <div className="flex flex-col md:flex-row gap-3">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+      {/* Filters + View toggle */}
+      <Card className="p-3">
+        <div className="grid gap-2.5 2xl:grid-cols-[minmax(190px,1fr)_auto] 2xl:items-center">
+          <div className="relative min-w-0">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-text-muted" />
             <input
               type="text"
-              placeholder="Suche nach Firma, Kontakt oder E-Mail..."
+              placeholder="Suche nach Firma, Kontakt oder E-Mail…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#7c3aed] focus:ring-opacity-20 focus:border-[#7c3aed] transition-all text-sm"
+              className={`${inputClass} h-9 pl-9`}
             />
           </div>
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-gray-400" />
-            <div className="w-48">
-              <CustomSelect
-                value={statusFilter === 'all' ? 'Alle Status' : statusFilter}
-                onChange={(value) => setStatusFilter(value === 'Alle Status' ? 'all' : value)}
-                options={['Alle Status', 'Neu', 'Qualifiziert', 'Angebot', 'Verhandlung', 'Gewonnen', 'Verloren']}
-              />
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-gray-400" />
-            <div className="w-48">
-              <CustomSelect
-                value={priorityFilter === 'all' ? 'Alle Prioritäten' : priorityFilter}
-                onChange={(value) => setPriorityFilter(value === 'Alle Prioritäten' ? 'all' : value)}
-                options={['Alle Prioritäten', 'Hoch', 'Mittel', 'Niedrig']}
-              />
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-gray-400" />
-            <div className="w-48">
-              <CustomSelect
-                value={assignedToFilter === 'all' ? 'Alle Benutzer' : assignedToFilter}
-                onChange={(value) => setAssignedToFilter(value === 'Alle Benutzer' ? 'all' : value)}
-                options={assignedUsers}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Desktop Table View */}
-      <div className="hidden md:block bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">Firma</th>
-                <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">Kontakt</th>
-                <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700 text-center">Score</th>
-                <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">Status</th>
-                <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">Quelle</th>
-                <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">Aktualisiert</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filteredLeads.map((lead) => {
-                const score = lead.designScore || lead.leadScore;
-                const scoreStyle = getScoreColor(score);
-                return (
-                  <tr
-                    key={lead.id}
-                    onClick={() => setDetailLead(lead)}
-                    className="hover:bg-purple-50/50 transition-colors cursor-pointer"
-                  >
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-[#7c3aed] to-[#a78bfa] rounded-lg flex items-center justify-center shadow-sm shadow-purple-500/20 flex-shrink-0">
-                          <span className="text-white font-bold">{lead.company[0]}</span>
-                        </div>
-                        <div className="min-w-0">
-                          <div className="font-semibold text-gray-900 truncate max-w-[200px]">{lead.company}</div>
-                          <div className="text-xs text-gray-500 truncate max-w-[200px]">{lead.industry || lead.niche || 'Keine Branche'}</div>
-                          {(lead.website || lead.websiteUrl) && (
-                            <a
-                              href={lead.website || lead.websiteUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 mt-0.5 truncate max-w-[200px]"
-                            >
-                              <Globe className="w-3 h-3 flex-shrink-0" />
-                              <span className="truncate">{(lead.website || lead.websiteUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, '')}</span>
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="space-y-1">
-                        {lead.contactPerson && (
-                          <div className="text-gray-900 font-medium text-sm truncate max-w-[180px]">{lead.contactPerson}</div>
-                        )}
-                        {lead.email && lead.email !== 'nicht gefunden' && (
-                          <a
-                            href={`mailto:${lead.email}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="text-xs text-gray-600 hover:text-purple-600 flex items-center gap-1 truncate max-w-[180px]"
-                          >
-                            <Mail className="w-3 h-3 flex-shrink-0" />
-                            <span className="truncate">{lead.email}</span>
-                          </a>
-                        )}
-                        {lead.phone && (
-                          <a
-                            href={`tel:${lead.phone}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="text-xs text-gray-600 hover:text-purple-600 flex items-center gap-1"
-                          >
-                            <Phone className="w-3 h-3 flex-shrink-0" />
-                            <span>{lead.phone}</span>
-                          </a>
-                        )}
-                        {(lead.city || lead.address) && (
-                          <div className="text-xs text-gray-400 truncate max-w-[180px]">
-                            {lead.city || lead.address}
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-center">
-                      {score ? (
-                        <div className="flex flex-col items-center gap-1">
-                          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${scoreStyle.bg} ${scoreStyle.text}`}>
-                            {score}/100
-                          </span>
-                          <span className="text-[10px] text-gray-500">{scoreStyle.label}</span>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-gray-400">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="space-y-1">
-                        <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${statusColors[lead.status]}`}>
-                          {lead.status}
-                        </span>
-                        {lead.priority && (
-                          <span className={`block px-2.5 py-1 rounded-lg text-xs font-medium ${priorityColors[lead.priority]} w-fit`}>
-                            {lead.priority}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-4">
-                      <div>
-                        <span className="text-sm font-medium text-gray-900">{lead.source}</span>
-                        {lead.value && lead.value > 0 && (
-                          <p className="text-xs text-gray-500 mt-0.5">€{lead.value.toLocaleString()}</p>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-2 text-xs text-gray-500">
-                        <Clock className="w-3 h-3" />
-                        <span>{formatRelativeTime(lead.updatedAt)}</span>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {filteredLeads.length === 0 && (
-            <div className="text-center py-16 text-gray-400">
-              <Search className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-              <p className="text-lg font-medium">Keine Leads gefunden</p>
-              <p className="text-sm mt-1">Versuchen Sie es mit anderen Suchkriterien</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Mobile Card View */}
-      <div className="md:hidden space-y-3">
-        {filteredLeads.map((lead) => (
-          <div key={lead.id} className="bg-white p-4 rounded-xl border border-gray-200 active:bg-gray-50">
-            <div className="flex items-start gap-3 mb-3">
-              <div className="w-12 h-12 bg-gradient-to-br from-[#7c3aed] to-[#a78bfa] rounded-lg flex items-center justify-center shadow-sm shadow-purple-500/20 flex-shrink-0">
-                <span className="text-white font-bold text-lg">{lead.company[0]}</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-gray-900 truncate">{lead.company}</h3>
-                <p className="text-sm text-gray-500 truncate">{lead.contactPerson}</p>
-                <p className="text-xs text-gray-400 truncate mt-1">{lead.email}</p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 mb-3">
-              <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${statusColors[lead.status]}`}>
-                {lead.status}
-              </span>
-              {lead.priority && (
-                <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${priorityColors[lead.priority]}`}>
-                  {lead.priority}
-                </span>
+          <div className="flex flex-wrap items-center gap-1.5 2xl:flex-nowrap">
+            <Filter className="size-4 shrink-0 text-text-muted" />
+            <CustomSelect
+              className="w-[148px] shrink-0"
+              value={dealerTypeFilter === 'all' ? 'Alle Händlerarten' : dealerTypeFilter === 'neuteile' ? 'Neuteilehändler' : dealerTypeFilter === 'gebrauchtteile' ? 'Gebrauchtteilehändler' : 'Noch einordnen'}
+              onChange={(v) => setDealerTypeFilter(v === 'Alle Händlerarten' ? 'all' : v === 'Neuteilehändler' ? 'neuteile' : v === 'Gebrauchtteilehändler' ? 'gebrauchtteile' : 'unclassified')}
+              options={['Alle Händlerarten', 'Neuteilehändler', 'Gebrauchtteilehändler', 'Noch einordnen']}
+            />
+            <CustomSelect
+              className="w-[126px] shrink-0"
+              value={countryFilter === 'all' ? 'Alle Länder' : COUNTRY_LABELS[countryFilter] || countryFilter}
+              onChange={(v) => setCountryFilter(v === 'Alle Länder' ? 'all' : Object.entries(COUNTRY_LABELS).find(([, label]) => label === v)?.[0] || 'all')}
+              options={['Alle Länder', ...Object.values(COUNTRY_LABELS)]}
+            />
+            <CustomSelect className="w-[126px] shrink-0" value={statusFilter === 'all' ? 'Alle Status' : statusFilter}
+              onChange={(v) => setStatusFilter(v === 'Alle Status' ? 'all' : v)} options={['Alle Status', ...statuses]} />
+            <CustomSelect className="w-[140px] shrink-0" value={priorityFilter === 'all' ? 'Alle Prioritäten' : priorityFilter}
+              onChange={(v) => setPriorityFilter(v === 'Alle Prioritäten' ? 'all' : v)} options={['Alle Prioritäten', 'Hoch', 'Mittel', 'Niedrig']} />
+            <CustomSelect className="w-[132px] shrink-0" value={assignedToFilter === 'all' ? 'Alle Benutzer' : assignedToFilter}
+              onChange={(v) => setAssignedToFilter(v === 'Alle Benutzer' ? 'all' : v)} options={assignedUsers} />
+            <CustomSelect
+              className="w-[158px] shrink-0"
+              value={SORT_PRESETS.find((o) => o.field === sortField && o.dir === sortDirection)?.label || 'Sortierung'}
+              onChange={(v) => {
+                const o = SORT_PRESETS.find((x) => x.label === v);
+                if (o) { setSortField(o.field); setSortDirection(o.dir); }
+              }}
+              options={SORT_PRESETS.map((o) => o.label)}
+            />
+            <button
+              type="button"
+              onClick={() => setDueOnly((d) => !d)}
+              title="Nur Leads mit fälligem Follow-up (heute oder überfällig)"
+              className={cn(
+                'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm transition-colors',
+                dueOnly
+                  ? 'border-status-warning/40 bg-status-warning/15 text-status-warning'
+                  : 'border-border-strong text-text-secondary hover:bg-elevated',
               )}
-              <span className="px-2.5 py-1 bg-gray-100 text-gray-700 rounded-lg text-xs font-medium">
-                {lead.source}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-              <span className="font-semibold text-gray-900">€{lead.value?.toLocaleString() || '0'}</span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setDetailLead(lead)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors active:scale-95"
-                >
-                  <Eye className="w-5 h-5 text-gray-500" />
-                </button>
-                <button
-                  onClick={() => handleEditClick(lead)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors active:scale-95"
-                >
-                  <Edit className="w-5 h-5 text-gray-500" />
-                </button>
-                <button
-                  onClick={() => handleDeleteLead(lead.id)}
-                  className="p-2 hover:bg-red-50 rounded-lg transition-colors active:scale-95"
-                >
-                  <Trash2 className="w-5 h-5 text-red-500" />
-                </button>
-              </div>
-            </div>
+            >
+              <CalendarClock className="size-4" />
+              Fällig{dueCount > 0 && <span className="tabular-nums">({dueCount})</span>}
+            </button>
+            <ViewToggle view={view} onChange={setView} />
           </div>
-        ))}
+        </div>
+      </Card>
 
-        {filteredLeads.length === 0 && (
-          <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-200">
-            <Search className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p className="font-medium">Keine Leads gefunden</p>
-            <p className="text-sm mt-1">Versuchen Sie andere Suchkriterien</p>
+      {/* Bulk-Aktionsleiste */}
+      {selectedRealIds.length > 0 && (
+        <BulkBar
+          count={selectedRealIds.length}
+          lists={lists}
+          admins={adminNames}
+          onAssign={assignToList}
+          onAssignUser={bulkAssignUser}
+          onCreateAssign={createAndAssign}
+          onRemoveFromList={activeSeg.startsWith('list:') ? removeFromCurrentList : undefined}
+          onBrochure={sendBrochures}
+          brochureBusy={brochureBusy}
+          onDelete={bulkDelete}
+          onClear={clearSelection}
+        />
+      )}
+
+      </div>
+
+      {/* Arbeitsfläche: Liste/Board links, Lead-Maske rechts daneben.
+          Beide Spalten scrollen FUER SICH — die Seite selbst gar nicht mehr.
+          Vorher scrollten Seite und Maske gleichzeitig, und wer in der Maske
+          ans Ende kam, schob unversehens die Seite weiter. */}
+      <div className={cn(ARBEITSFLAECHE, 'mx-auto w-full max-w-[1620px]')}>
+        <div className={cn(SPALTE_SCROLLT, 'min-w-0 flex-1 space-y-3.5 pb-2')}>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="Alle Leads" value={leads.length} />
+        <StatCard label="Neuteilehändler" value={leads.filter((l) => l.dealerType === 'neuteile').length} />
+        <StatCard label="Gebrauchtteilehändler" value={leads.filter((l) => l.dealerType === 'gebrauchtteile' || l.dealerType === 'verwerter').length} />
+        <StatCard label="Noch einordnen" value={leads.filter((l) => !l.dealerType).length} />
+      </div>
+
+      {view === 'board' ? (
+        <BoardView statuses={statuses} leads={filteredLeads} onOpen={setDetailLead} onQuickAdd={quickAdd} />
+      ) : (
+        <>
+          <Card className="hidden overflow-visible md:block">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border-subtle bg-elevated/50">
+                    <th className="w-10 px-3 py-2.5">
+                      <CheckBox checked={allVisibleSelected} onChange={toggleAllVisible} ariaLabel="Alle auswählen" />
+                    </th>
+                    <SortHead label="Firma" field="company" sortField={sortField} dir={sortDirection} onSort={handleSort} />
+                    {!compact && <th className="label-technical px-3 py-2.5 text-left text-text-muted">Händler / Land</th>}
+                    {!compact && <th className="label-technical px-3 py-2.5 text-left text-text-muted">Kontakt</th>}
+                    {!compact && <th className="label-technical px-3 py-2.5 text-center text-text-muted">Score</th>}
+                    <th className="label-technical px-3 py-2.5 text-left text-text-muted">Status</th>
+                    {!compact && <th className="label-technical px-3 py-2.5 text-left text-text-muted">Priorität</th>}
+                    {!compact && <th className="label-technical px-3 py-2.5 text-left text-text-muted">Zugewiesen</th>}
+                    {!compact && <SortHead label="Quelle / Wert" field="value" sortField={sortField} dir={sortDirection} onSort={handleSort} />}
+                    <SortHead label="Letzter Kontakt" field="lastContact" sortField={sortField} dir={sortDirection} onSort={handleSort} />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-subtle">
+                  {filteredLeads.map((lead) => {
+                    const score = lead.designScore || lead.leadScore;
+                    const stn = scoreTone(score);
+                    const website = lead.website || lead.websiteUrl;
+                    const isSel = selected.has(lead.id);
+                    return (
+                      <tr key={lead.id} onClick={() => setDetailLead(lead)}
+                        className={cn(
+                          'cursor-pointer transition-colors hover:bg-elevated',
+                          isSel && 'bg-accent-500/5',
+                          detailLead?.id === lead.id && 'bg-accent-500/10',
+                        )}>
+                        <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          <CheckBox checked={isSel} onChange={() => toggleOne(lead.id)} ariaLabel={`${lead.company} auswählen`} />
+                        </td>
+                        <td className="max-w-[240px] px-3 py-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex size-9 flex-shrink-0 items-center justify-center rounded-md bg-accent-500/15 font-semibold text-accent-500">{lead.company[0]}</div>
+                            <div className="min-w-0">
+                              <div className="truncate font-medium text-text-primary">{lead.company}</div>
+                              <div className="truncate text-xs text-text-muted">{lead.industry || lead.niche || lead.city || 'Keine Branche'}</div>
+                              {website && (
+                                <a href={website} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                                  className="mt-0.5 flex items-center gap-1 truncate text-xs text-text-secondary hover:text-accent-500">
+                                  <Globe className="size-3 shrink-0" /><span className="truncate">{stripUrl(website)}</span>
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        {!compact && (
+                        <td className="px-3 py-2.5">
+                          <Badge tone={lead.dealerType === 'gebrauchtteile' || lead.dealerType === 'verwerter' ? 'used' : lead.dealerType === 'neuteile' ? 'accent' : 'neutral'}>
+                            {dealerLabel(lead.dealerType)}
+                          </Badge>
+                          <div className="mt-1.5 text-xs text-text-muted">
+                            {COUNTRY_LABELS[countryCode(lead.country)] || lead.country || 'Land offen'}
+                          </div>
+                        </td>
+                        )}
+                        {!compact && (
+                        <td className="max-w-[190px] px-3 py-2.5">
+                          <div className="space-y-1">
+                            {lead.contactPerson && <div className="truncate font-medium text-text-primary">{lead.contactPerson}</div>}
+                            {lead.email && lead.email !== 'nicht gefunden' && (
+                              <a href={`mailto:${lead.email}`} onClick={(e) => e.stopPropagation()}
+                                className="flex items-center gap-1 truncate text-xs text-text-secondary hover:text-accent-500">
+                                <Mail className="size-3 shrink-0" /><span className="truncate">{lead.email}</span>
+                              </a>
+                            )}
+                            {lead.phone && (
+                              <a href={`tel:${lead.phone}`} onClick={(e) => e.stopPropagation()}
+                                className="flex items-center gap-1 text-xs text-text-secondary hover:text-accent-500">
+                                <Phone className="size-3 shrink-0" /><span>{lead.phone}</span>
+                              </a>
+                            )}
+                          </div>
+                        </td>
+                        )}
+                        {!compact && (
+                        <td className="px-3 py-2.5 text-center">
+                          {score ? (
+                            <div className="flex flex-col items-center gap-1">
+                              <Badge tone={stn.tone}>{score}/100</Badge>
+                              <span className="text-[10px] text-text-muted">{stn.label}</span>
+                            </div>
+                          ) : <span className="text-xs text-text-muted">—</span>}
+                        </td>
+                        )}
+                        <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          <StatusSelect value={lead.status} options={statuses} onChange={(s) => changeStatus(lead, s)} />
+                        </td>
+                        {!compact && <td className="px-3 py-2.5">{lead.priority ? <PriorityPill priority={lead.priority} /> : <span className="text-xs text-text-muted">—</span>}</td>}
+                        {!compact && (
+                        <td className="px-3 py-2.5">
+                          {lead.assignedTo ? (
+                            <span className="inline-flex max-w-[120px] items-center gap-1.5 text-sm text-text-primary">
+                              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-500/20 text-[11px] font-semibold text-accent-500">
+                                {lead.assignedTo.slice(0, 2).toUpperCase()}
+                              </span>
+                              <span className="truncate">{lead.assignedTo}</span>
+                            </span>
+                          ) : (
+                            <span className="text-xs text-text-muted">—</span>
+                          )}
+                          {isDue(lead) && (
+                            <div className="mt-1"><Badge tone="warning">Follow-up fällig</Badge></div>
+                          )}
+                        </td>
+                        )}
+                        {!compact && (
+                        <td className="px-3 py-2.5">
+                          <div className="font-medium text-text-primary">{lead.source}</div>
+                          {lead.value && lead.value > 0 && <p className="mt-0.5 text-xs text-text-muted tabular-nums">€{lead.value.toLocaleString('de-DE')}</p>}
+                        </td>
+                        )}
+                        <td className="max-w-[240px] px-3 py-2.5">
+                          {lead.lastContactDate ? (
+                            <div className="flex items-center gap-2 text-xs text-text-secondary">
+                              <Phone className="size-3 shrink-0" /><span>{formatRelativeTime(lead.lastContactDate)}</span>
+                            </div>
+                          ) : (
+                            <span className="text-xs font-medium text-status-warning">Nie</span>
+                          )}
+                          {lead.lastNote && (
+                            <p
+                              className="mt-1 line-clamp-2 whitespace-normal text-xs leading-snug text-text-muted"
+                              title={`${lead.lastNoteBy ? lead.lastNoteBy + ': ' : ''}${lead.lastNote}`}
+                            >
+                              „{lead.lastNote}“
+                            </p>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {filteredLeads.length === 0 && (
+                <EmptyState icon={<Search className="size-5" />} title="Keine Leads gefunden" description="Andere Ansicht/Filter wählen oder über den Lead-Scraper neue Leads ziehen." />
+              )}
+              <div className="border-t border-border-subtle px-4 py-2"><QuickAdd onAdd={(c) => quickAdd(c)} /></div>
+            </div>
+          </Card>
+
+          {/* Mobile Cards */}
+          <div className="space-y-3 md:hidden">
+            {filteredLeads.map((lead) => (
+              <Card key={lead.id} hover className="p-4">
+                <div className="mb-3 flex items-start gap-3">
+                  <CheckBox checked={selected.has(lead.id)} onChange={() => toggleOne(lead.id)} ariaLabel="auswählen" />
+                  <div className="flex size-11 flex-shrink-0 items-center justify-center rounded-md bg-accent-500/15 text-lg font-semibold text-accent-500">{lead.company[0]}</div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="truncate font-medium text-text-primary">{lead.company}</h3>
+                    <p className="truncate text-sm text-text-muted">{lead.contactPerson}</p>
+                    <p className="mt-1 truncate text-xs text-text-muted">{lead.email}</p>
+                  </div>
+                </div>
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <StatusSelect value={lead.status} options={statuses} onChange={(s) => changeStatus(lead, s)} />
+                  {lead.priority && <PriorityPill priority={lead.priority} />}
+                  <Badge tone={lead.dealerType === 'gebrauchtteile' || lead.dealerType === 'verwerter' ? 'used' : lead.dealerType === 'neuteile' ? 'accent' : 'neutral'}>{dealerLabel(lead.dealerType)}</Badge>
+                  <Badge tone="neutral">{COUNTRY_LABELS[countryCode(lead.country)] || lead.country || 'Land offen'}</Badge>
+                  <Badge tone="neutral">{lead.source}</Badge>
+                </div>
+                <div className="flex items-center justify-between border-t border-border-subtle pt-3">
+                  <span className="font-semibold text-text-primary tabular-nums">€{lead.value?.toLocaleString('de-DE') || '0'}</span>
+                  <div className="flex items-center gap-1">
+                    <IconButton onClick={() => setDetailLead(lead)} aria-label="Details"><Eye className="size-4" /></IconButton>
+                    <IconButton onClick={() => handleEditClick(lead)} aria-label="Bearbeiten"><Edit className="size-4" /></IconButton>
+                    <IconButton tone="danger" onClick={() => handleDeleteLead(lead.id)} aria-label="Löschen"><Trash2 className="size-4" /></IconButton>
+                  </div>
+                </div>
+              </Card>
+            ))}
+            {filteredLeads.length === 0 && (
+              <Card><EmptyState icon={<Search className="size-5" />} title="Keine Leads gefunden" description="Andere Ansicht/Filter wählen." /></Card>
+            )}
           </div>
+        </>
+      )}
+        </div>
+
+        {/* Die Maske klebt nicht mehr, sie FUELLT ihre Spalte. Kleben hiess:
+            die Seite scrollt, die Maske bleibt scheinbar stehen — und ihre
+            Hoehe musste aus Kopfzeile und Klebeabstand errechnet werden. Jetzt
+            ist sie einfach so hoch wie die Arbeitsflaeche, ohne jede
+            Rechnung. */}
+        {detailLead && wideScreen && (
+          <aside className="flex min-h-0 w-[540px] shrink-0 flex-col xl:w-[600px] 2xl:w-[680px]">
+            <LeadDetailModal
+              key={detailLead.id}
+              variant="panel"
+              lead={detailLead}
+              onClose={() => setDetailLead(null)}
+              onEdit={(lead) => { setDetailLead(null); setEditingLead(lead); setEditFromDetail(true); setIsModalOpen(true); }}
+              onLeadChanged={loadLeads}
+              onDelete={() => { handleDeleteLead(detailLead.id); setDetailLead(null); }}
+            />
+          </aside>
         )}
       </div>
 
-      {/* Pagination */}
-      {filteredLeads.length > 0 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between bg-white p-4 md:p-5 rounded-xl border border-gray-200 gap-3">
-          <p className="text-xs md:text-sm text-gray-600">
-            Zeige <span className="font-semibold">{filteredLeads.length}</span> von <span className="font-semibold">{leads.length}</span> Leads
-          </p>
-          <div className="flex items-center gap-2">
-            <button className="px-3 py-2 md:px-4 md:py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-              Zurück
-            </button>
-            <button className="px-3 py-2 md:px-4 md:py-2 text-sm font-medium text-white bg-gradient-to-r from-[#7c3aed] to-[#a78bfa] rounded-lg hover:shadow-lg hover:shadow-purple-500/30 transition-all duration-200">
-              Weiter
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Import Modal */}
-      {isImportModalOpen && (
-        <ImportModal
-          onClose={() => setIsImportModalOpen(false)}
-          onImport={loadLeads}
-        />
-      )}
-
-      {/* Lead Modal */}
+      {isImportModalOpen && <ImportModal onClose={() => setIsImportModalOpen(false)} onImport={handleImportLeads} />}
+      {duplicatesOpen && <DuplicatesModal onClose={() => setDuplicatesOpen(false)} onMerged={loadLeads} />}
       {isModalOpen && (
         <LeadModal
           lead={editingLead}
-          onClose={() => {
+          onClose={() => { setIsModalOpen(false); setEditingLead(null); setEditFromDetail(false); }}
+          onSave={handleSaveLead}
+          onBack={editFromDetail && editingLead ? () => {
+            const l = editingLead;
             setIsModalOpen(false);
             setEditingLead(null);
-          }}
-          onSave={handleSaveLead}
+            setEditFromDetail(false);
+            setDetailLead(l);
+          } : undefined}
         />
       )}
-
-      {/* Detail Modal */}
-      {detailLead && (
-        <LeadDetailModal
-          lead={detailLead}
-          onClose={() => setDetailLead(null)}
-          onEdit={(lead) => {
-            setDetailLead(null);
-            setEditingLead(lead);
-            setIsModalOpen(true);
-          }}
-          onDelete={() => {
-            handleDeleteLead(detailLead.id);
-            setDetailLead(null);
-          }}
-        />
+      {/* Schmale Screens: klassisches Modal statt Seitenpanel */}
+      {detailLead && !wideScreen && (
+        <LeadDetailModal lead={detailLead} onClose={() => setDetailLead(null)}
+          onEdit={(lead) => { setDetailLead(null); setEditingLead(lead); setEditFromDetail(true); setIsModalOpen(true); }}
+          onLeadChanged={loadLeads}
+          onDelete={() => { handleDeleteLead(detailLead.id); setDetailLead(null); }} />
       )}
     </div>
+  );
+}
+
+/* ── Checkbox ──────────────────────────────────────────────── */
+function CheckBox({ checked, onChange, ariaLabel }: { checked: boolean; onChange: () => void; ariaLabel?: string }) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      onClick={(e) => { e.stopPropagation(); onChange(); }}
+      className={cn(
+        'flex size-[18px] shrink-0 items-center justify-center rounded border transition-colors',
+        checked ? 'border-accent-500 bg-accent-500 text-white' : 'border-border-strong bg-canvas hover:border-accent-500',
+      )}
+    >
+      {checked && <Check className="size-3" strokeWidth={3} />}
+    </button>
+  );
+}
+
+/* ── Lead-Listen-Leiste (Quellen + eigene Listen) ──────────── */
+function SegmentBar({
+  active, onSelect, lists, segCount, onCreate, onDeleteList,
+}: {
+  active: string;
+  onSelect: (key: string) => void;
+  lists: LeadList[];
+  segCount: (key: string) => number;
+  onCreate: (name: string) => void;
+  onDeleteList: (id: string, name: string) => void;
+}) {
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const pill = (key: string, label: string, count: number, deletable?: { id: string; name: string }) => {
+    const isActive = active === key;
+    return (
+      <div key={key} className={cn(
+        'group inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors',
+        isActive ? 'border-accent-500/40 bg-accent-500/15 text-accent-500' : 'border-border-subtle bg-surface text-text-secondary hover:border-border-strong hover:text-text-primary',
+      )}>
+        <button type="button" onClick={() => onSelect(key)} className="inline-flex items-center gap-1.5">
+          {label}
+          <span className={cn('rounded px-1 text-[10px] tabular-nums', isActive ? 'bg-accent-500/20 text-accent-500' : 'bg-elevated text-text-muted')}>{count}</span>
+        </button>
+        {deletable && (
+          <button type="button" onClick={() => onDeleteList(deletable.id, deletable.name)} aria-label="Liste löschen"
+            className="opacity-0 transition-opacity hover:text-status-danger group-hover:opacity-100">
+            <X className="size-3" />
+          </button>
+        )}
+      </div>
+    );
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {SOURCE_SEGMENTS.map((s) => pill(s.key, s.label, segCount(s.key)))}
+      {lists.length > 0 && <span className="mx-1 h-5 w-px bg-border-subtle" aria-hidden />}
+      {lists.map((l) => pill(`list:${l.id}`, l.name, segCount(`list:${l.id}`), { id: l.id, name: l.name }))}
+      {creating ? (
+        <div className="inline-flex items-center gap-1.5 rounded-md border border-accent-500/40 bg-surface px-2 py-1">
+          <Layers className="size-3.5 text-text-muted" />
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && name.trim()) { onCreate(name.trim()); setName(''); setCreating(false); }
+              if (e.key === 'Escape') { setName(''); setCreating(false); }
+            }}
+            placeholder="Listenname…" className="h-6 w-32 bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none" />
+          <IconButton className="size-6" onClick={() => { if (name.trim()) { onCreate(name.trim()); setName(''); setCreating(false); } }} aria-label="Erstellen"><Check className="size-3.5" /></IconButton>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setCreating(true)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-border-strong px-3 py-1.5 text-sm text-text-muted transition-colors hover:border-accent-500 hover:text-accent-500">
+          <ListPlus className="size-3.5" /> Liste erstellen
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ── Bulk-Aktionsleiste ────────────────────────────────────── */
+function BulkBar({
+  count, lists, admins, onAssign, onAssignUser, onCreateAssign, onRemoveFromList, onBrochure, brochureBusy, onDelete, onClear,
+}: {
+  count: number;
+  lists: LeadList[];
+  admins: string[];
+  onAssign: (listId: string) => void;
+  onAssignUser: (username: string | null) => void;
+  onCreateAssign: (name: string) => void;
+  onRemoveFromList?: () => void;
+  onBrochure: () => void;
+  brochureBusy: boolean;
+  onDelete: () => void;
+  onClear: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  const userRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setMenuOpen(false);
+      if (userRef.current && !userRef.current.contains(e.target as Node)) setUserMenuOpen(false);
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border border-accent-500/30 bg-accent-500/10 px-4 py-2.5">
+      <span className="text-sm font-medium text-text-primary">{count} ausgewählt</span>
+      {/* Zuweisen an echten Admin-Account */}
+      <div className="relative" ref={userRef}>
+        <Button size="sm" onClick={() => setUserMenuOpen((o) => !o)}>
+          <UserPlus className="size-4" /> Zuweisen an <ChevronDown className="size-3.5 opacity-70" />
+        </Button>
+        {userMenuOpen && (
+          <div className="absolute z-50 mt-1 min-w-[200px] rounded-md border border-border-subtle bg-elevated p-1 shadow-modal">
+            {admins.length === 0 && <p className="px-2 py-2 text-xs text-text-muted">Keine Admin-Accounts geladen.</p>}
+            {admins.map((name) => (
+              <button key={name} type="button" onClick={() => { onAssignUser(name); setUserMenuOpen(false); }}
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-text-secondary transition-colors hover:bg-elevated-hover hover:text-text-primary">
+                <span className="flex size-5 items-center justify-center rounded-full bg-accent-500/20 text-[10px] font-semibold text-accent-500">
+                  {name.slice(0, 2).toUpperCase()}
+                </span>
+                {name}
+              </button>
+            ))}
+            <div className="my-1 border-t border-border-subtle" />
+            <button type="button" onClick={() => { onAssignUser(null); setUserMenuOpen(false); }}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-text-muted transition-colors hover:bg-elevated-hover hover:text-text-primary">
+              <X className="size-3.5" /> Zuweisung entfernen
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="relative" ref={ref}>
+        <Button size="sm" onClick={() => setMenuOpen((o) => !o)}>
+          <ListPlus className="size-4" /> Zu Liste hinzufügen <ChevronDown className="size-3.5 opacity-70" />
+        </Button>
+        {menuOpen && (
+          <div className="absolute z-50 mt-1 min-w-[220px] rounded-md border border-border-subtle bg-elevated p-1 shadow-modal">
+            {lists.length === 0 && <p className="px-2 py-2 text-xs text-text-muted">Noch keine eigenen Listen.</p>}
+            {lists.map((l) => (
+              <button key={l.id} type="button" onClick={() => { onAssign(l.id); setMenuOpen(false); }}
+                className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm text-text-secondary transition-colors hover:bg-elevated-hover hover:text-text-primary">
+                <span className="inline-flex items-center gap-2"><Layers className="size-3.5 text-text-muted" />{l.name}</span>
+                <span className="text-[10px] text-text-muted tabular-nums">{l.count}</span>
+              </button>
+            ))}
+            <div className="my-1 border-t border-border-subtle" />
+            <div className="flex items-center gap-1 px-1 py-1">
+              <input value={newName} onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && newName.trim()) { onCreateAssign(newName.trim()); setNewName(''); setMenuOpen(false); } }}
+                placeholder="Neue Liste…" className={cn(inputClass, 'h-8')} />
+              <IconButton className="size-8" onClick={() => { if (newName.trim()) { onCreateAssign(newName.trim()); setNewName(''); setMenuOpen(false); } }} aria-label="Erstellen + zuordnen"><Plus className="size-4" /></IconButton>
+            </div>
+          </div>
+        )}
+      </div>
+      {onRemoveFromList && (
+        <Button size="sm" variant="outline" onClick={onRemoveFromList}><X className="size-4" /> Aus Liste entfernen</Button>
+      )}
+      <Button size="sm" variant="outline" onClick={onBrochure} disabled={brochureBusy}
+        title="Nur an Empfänger senden, die nach Unterlagen gefragt haben (UWG §7)">
+        <Mail className="size-4" /> {brochureBusy ? 'Sende…' : 'Broschüre senden'}
+      </Button>
+      <Button size="sm" variant="danger" onClick={onDelete}><Trash2 className="size-4" /> Löschen</Button>
+      <button type="button" onClick={onClear} className="ml-auto text-sm text-text-muted hover:text-text-primary">Abwählen</button>
+    </div>
+  );
+}
+
+/* ── View toggle ──────────────────────────────────────────── */
+function ViewToggle({ view, onChange }: { view: 'table' | 'board'; onChange: (v: 'table' | 'board') => void }) {
+  return (
+    <div className="inline-flex items-center gap-0.5 rounded-md border border-border-subtle bg-canvas p-0.5">
+      {([['table', Table2, 'Tabelle'], ['board', Columns3, 'Board']] as const).map(([key, Icon, label]) => (
+        <button key={key} type="button" onClick={() => onChange(key)}
+          className={cn('inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium transition-colors',
+            view === key ? 'bg-elevated text-text-primary' : 'text-text-muted hover:text-text-secondary')}>
+          <Icon className="size-3.5" />{label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ── Board (Gruppen nach Status) ──────────────────────────── */
+function BoardView({ statuses, leads, onOpen, onQuickAdd }: { statuses: string[]; leads: Lead[]; onOpen: (lead: Lead) => void; onQuickAdd: (company: string, status: string) => void; }) {
+  const groups = statuses.map((status) => ({ status, items: leads.filter((l) => l.status === status) }));
+  return (
+    <div className="space-y-4">
+      {groups.map((g) => <BoardGroup key={g.status} status={g.status} items={g.items} onOpen={onOpen} onQuickAdd={onQuickAdd} />)}
+    </div>
+  );
+}
+
+function BoardGroup({ status, items, onOpen, onQuickAdd }: { status: string; items: Lead[]; onOpen: (lead: Lead) => void; onQuickAdd: (company: string, status: string) => void; }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const sum = items.reduce((s, l) => s + (l.value || 0), 0);
+  const color = statusColor(status);
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-3 border-b border-border-subtle px-4 py-2.5">
+        <span className="h-5 w-1.5 rounded-full" style={{ backgroundColor: color }} aria-hidden />
+        <button onClick={() => setCollapsed((c) => !c)} className="text-sm font-semibold text-text-primary">{status}</button>
+        <Badge tone="neutral">{items.length}</Badge>
+        <span className="ml-auto text-xs text-text-muted tabular-nums">€{sum.toLocaleString('de-DE')}</span>
+      </div>
+      {!collapsed && (
+        <div>
+          {items.map((lead) => (
+            <button key={lead.id} onClick={() => onOpen(lead)}
+              className="flex w-full items-center gap-3 border-b border-border-subtle px-4 py-2.5 text-left transition-colors last:border-0 hover:bg-elevated">
+              <span className="h-8 w-0.5 rounded-full" style={{ backgroundColor: color }} aria-hidden />
+              <div className="flex size-8 flex-shrink-0 items-center justify-center rounded-md bg-accent-500/15 text-sm font-semibold text-accent-500">{lead.company[0]}</div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-text-primary">{lead.company}</div>
+                <div
+                  className="truncate text-xs text-text-muted"
+                  title={lead.lastNote ? `${lead.lastNoteBy ? lead.lastNoteBy + ': ' : ''}${lead.lastNote}` : undefined}
+                >
+                  {lead.lastNote ? `„${lead.lastNote}“` : (lead.contactPerson || lead.email || '—')}
+                </div>
+              </div>
+              {lead.priority && <PriorityPill priority={lead.priority} />}
+              <span className="hidden w-24 text-right text-sm font-medium text-text-primary tabular-nums sm:block">€{(lead.value || 0).toLocaleString('de-DE')}</span>
+            </button>
+          ))}
+          <div className="px-4 py-2"><QuickAdd onAdd={(c) => onQuickAdd(c, status)} placeholder={`+ Lead in „${status}"…`} /></div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ── Quick-Add ────────────────────────────────────────────── */
+function QuickAdd({ onAdd, placeholder = '+ Lead hinzufügen…' }: { onAdd: (company: string) => void; placeholder?: string }) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState('');
+  const commit = () => { if (value.trim()) onAdd(value); setValue(''); setOpen(false); };
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="flex items-center gap-1.5 text-sm text-text-muted transition-colors hover:text-text-secondary">
+        <Plus className="size-4" />{placeholder}
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <input autoFocus value={value} onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setValue(''); setOpen(false); } }}
+        placeholder="Firmenname…" className={cn(inputClass, 'h-8 max-w-xs')} />
+      <IconButton className="size-8" onClick={commit} aria-label="Hinzufügen"><Check className="size-4" /></IconButton>
+      <IconButton className="size-8" onClick={() => { setValue(''); setOpen(false); }} aria-label="Abbrechen"><X className="size-4" /></IconButton>
+    </div>
+  );
+}
+
+function SortHead({ label, field, sortField, dir, onSort }: { label: string; field: SortField; sortField: SortField; dir: 'asc' | 'desc'; onSort: (field: SortField) => void; }) {
+  const active = sortField === field;
+  return (
+    <th className="px-3 py-2.5 text-left">
+      <button type="button" onClick={() => onSort(field)} className="label-technical inline-flex items-center gap-1.5 text-text-muted transition-colors hover:text-text-secondary">
+        {label}
+        {active ? (dir === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />) : <ChevronsUpDown className="size-3 opacity-40" />}
+      </button>
+    </th>
   );
 }

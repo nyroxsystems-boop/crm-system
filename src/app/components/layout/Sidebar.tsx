@@ -1,0 +1,499 @@
+/**
+ * Sidebar — Partsunion CRM. Im exakten Schema des Admin-Dashboards:
+ *  - 240px ausgeklappt / 56px eingeklappt, localStorage-Persistenz
+ *  - 2px Sharp Accent-Bar bei aktivem Item (kein voller Highlight-BG)
+ *  - Sektionen, Tooltips bei collapsed, ⌘\-Toggle, Footer-Einklappen
+ *  - Mobile: Slide-Over-Drawer mit Backdrop
+ *
+ * Das CRM nutzt State-Navigation (kein react-router) → Items tragen eine
+ * `view`-Id statt einer Route.
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+import {
+  Clock,
+  LayoutDashboard,
+  Users,
+  Workflow,
+  Mail,
+  Radar,
+  BarChart3,
+  Calendar,
+  Settings as SettingsIcon,
+  UserCog,
+  Layers,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pin,
+  PinOff,
+  type LucideIcon,
+} from 'lucide-react';
+import { getLeads } from '../../utils/storage';
+import { cn } from '../ui/utils';
+import { berichteVorwaermen } from '../../vorwaermen';
+
+export type ViewId =
+  | 'dashboard'
+  | 'leads'
+  | 'pipeline'
+  | 'scraper'
+  | 'reports'
+  | 'kalender'
+  | 'settings'
+  | 'users'
+  | 'pipelineSettings';
+
+interface NavItem {
+  view: ViewId;
+  label: string;
+  icon: LucideIcon;
+}
+
+interface NavSection {
+  id: string;
+  label: string;
+  items: NavItem[];
+}
+
+export const NAV_SECTIONS: NavSection[] = [
+  {
+    id: 'crm',
+    label: 'CRM',
+    items: [
+      { view: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { view: 'leads', label: 'Leads', icon: Users },
+      { view: 'pipeline', label: 'Pipeline', icon: Workflow },
+      { view: 'scraper', label: 'Lead-Scraper', icon: Radar },
+      { view: 'reports', label: 'Berichte', icon: BarChart3 },
+      { view: 'kalender', label: 'Kalender', icon: Calendar },
+    ],
+  },
+  {
+    id: 'admin',
+    label: 'Administration',
+    items: [
+      { view: 'settings', label: 'Einstellungen', icon: SettingsIcon },
+      { view: 'users', label: 'Benutzerverwaltung', icon: UserCog },
+      { view: 'pipelineSettings', label: 'Pipeline-Setup', icon: Layers },
+    ],
+  },
+];
+
+/** Label einer View (für den Topbar-Titel). */
+export const VIEW_LABELS: Record<ViewId, string> = Object.fromEntries(
+  NAV_SECTIONS.flatMap((s) => s.items.map((i) => [i.view, i.label])),
+) as Record<ViewId, string>;
+
+const STORAGE_KEY = 'pu.crm.sidebar.collapsed.v1';
+const PIN_KEY = 'pu.crm.sidebar.pinned.v1';
+
+/**
+ * Lesen und Schreiben gekapselt: In Safaris privatem Modus und in verwalteten
+ * Firmenbrowsern wirft schon der Zugriff auf localStorage einen SecurityError.
+ * Ohne Kapselung risse das die ganze Seitenleiste mit — fuer eine Einstellung,
+ * die niemand braucht, um zu arbeiten.
+ */
+function lies(schluessel: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(schluessel) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function schreib(schluessel: string, wert: boolean): void {
+  try {
+    window.localStorage.setItem(schluessel, wert ? '1' : '0');
+  } catch {
+    /* Ohne Speicher gilt die Einstellung nur fuer diese Sitzung. */
+  }
+}
+
+interface SidebarProps {
+  activeView: ViewId;
+  onNavigate: (view: ViewId) => void;
+  mobileOpen: boolean;
+  onMobileOpenChange: (open: boolean) => void;
+}
+
+export function Sidebar({ activeView, onNavigate, mobileOpen, onMobileOpenChange }: SidebarProps) {
+  const [collapsed, setCollapsed] = useState<boolean>(() => lies(STORAGE_KEY));
+  /**
+   * Angeheftet = die Seitenleiste bleibt offen stehen.
+   *
+   * Ohne das klappte sie nach JEDEM Klick wieder ein — auch wenn man sie
+   * gerade aufgeklappt hatte. Wer sich beim Arbeiten an der Navigation
+   * orientiert, musste sie dutzendfach am Tag neu aufziehen.
+   *
+   * Angeheftet gewinnt immer: keine automatische Einklappung nach der
+   * Navigation, kein Hover-Overlay (es waere ja schon offen).
+   */
+  const [angeheftet, setAngeheftet] = useState<boolean>(() => lies(PIN_KEY));
+  // Hover-Ausklappen: bei eingeklappter Sidebar legt sich beim Drüberfahren ein
+  // ausgeklapptes Overlay ÜBER den Inhalt (kein Layout-Shift der Tabelle).
+  const [hovering, setHovering] = useState(false);
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      schreib(STORAGE_KEY, next);
+      // Einklappen und angeheftet sein widerspricht sich. Wer einklappt, will
+      // die Leiste weghaben — also loest sich die Anheftung mit.
+      if (next) {
+        setAngeheftet(false);
+        schreib(PIN_KEY, false);
+      }
+      return next;
+    });
+  }, []);
+
+  /** Anheften bedeutet immer auch: aufgeklappt. */
+  const toggleAngeheftet = useCallback(() => {
+    setAngeheftet((prev) => {
+      const next = !prev;
+      schreib(PIN_KEY, next);
+      if (next) {
+        setCollapsed(false);
+        schreib(STORAGE_KEY, false);
+        setHovering(false);
+      }
+      return next;
+    });
+  }, []);
+
+  // Nach jeder Navigation automatisch einklappen — die Arbeitsflächen (Leads,
+  // Pipeline …) bekommen die volle Breite; ausklappen jederzeit per Hover.
+  // ES SEI DENN, die Leiste ist angeheftet: dann bleibt sie, wo sie ist.
+  const handleNavigate = useCallback(
+    (view: ViewId) => {
+      onNavigate(view);
+      if (angeheftet) return;
+      setHovering(false);
+      setCollapsed(true);
+      schreib(STORAGE_KEY, true);
+    },
+    [onNavigate, angeheftet],
+  );
+
+  // ⌘\ / Ctrl+\ Toggle
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault();
+        toggleCollapsed();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleCollapsed]);
+
+  return (
+    <>
+      {/* Desktop — bei collapsed legt Hover ein ausgeklapptes Overlay über den Inhalt */}
+      <div
+        className="relative hidden shrink-0 md:block"
+        onMouseEnter={() => setHovering(true)}
+        onMouseLeave={() => setHovering(false)}
+      >
+        <aside
+          className={cn(
+            'sticky top-0 flex h-screen flex-col border-r border-border-subtle',
+            // Redesign: durchscheinende Verlaufsfläche statt deckendem Grau.
+            // Die Leiste sitzt damit auf dem Lichtverlauf der Seite, statt ihn
+            // zu verdecken.
+            'bg-gradient-to-b from-overlay/[0.028] to-overlay/[0.006]',
+            'transition-[width] duration-200 ease-out',
+            collapsed ? 'w-16' : 'w-64',
+          )}
+          aria-label="Hauptnavigation"
+        >
+          <Brand collapsed={collapsed} />
+          <Nav activeView={activeView} onNavigate={handleNavigate} collapsed={collapsed} />
+          <Footer
+            collapsed={collapsed}
+            onToggle={toggleCollapsed}
+            angeheftet={angeheftet}
+            onToggleAngeheftet={toggleAngeheftet}
+            onNavigate={handleNavigate}
+          />
+        </aside>
+        {collapsed && hovering && (
+          <aside
+            className="absolute inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-border-subtle bg-canvas shadow-2xl"
+            aria-label="Hauptnavigation (ausgeklappt)"
+          >
+            <Brand collapsed={false} />
+            <Nav activeView={activeView} onNavigate={handleNavigate} collapsed={false} />
+            {/* Der Anheft-Knopf sitzt bewusst AUCH hier: so kann man die Leiste
+                aufziehen und im selben Zug festmachen, ohne sie erst ueber den
+                Fussknopf dauerhaft aufklappen zu muessen. */}
+            <Footer
+              collapsed={false}
+              onToggle={toggleCollapsed}
+              angeheftet={angeheftet}
+              onToggleAngeheftet={toggleAngeheftet}
+              onNavigate={handleNavigate}
+            />
+          </aside>
+        )}
+      </div>
+
+      {/* Mobile Drawer */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => onMobileOpenChange(false)}
+          />
+          <aside className="animate-slide-in-up absolute inset-y-0 left-0 flex w-64 flex-col border-r border-border-subtle bg-surface">
+            <Brand collapsed={false} />
+            <Nav
+              activeView={activeView}
+              onNavigate={(v) => {
+                onNavigate(v);
+                onMobileOpenChange(false);
+              }}
+              collapsed={false}
+            />
+          </aside>
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * Markenblock nach dem Redesign: Verlaufsquadrat mit UNSEREM Symbol, daneben
+ * Name und "SALES CRM" in Versalien.
+ *
+ * Im Quadrat steht das echte Logo, nicht das gezeichnete "P" des Entwurfs. Die
+ * Geometrie ist die des Entwurfs (32 px, 9 px Radius, Akzentverlauf).
+ *
+ * Warum die weisse Ausstanzung und nicht das farbige Logo: das Markenblau
+ * (#2260cd) auf dem Akzentverlauf ergibt keinen Kontrast — Blau auf Blau. Die
+ * Datei ist aus der Wortmarke freigestellt, nicht nachgezeichnet.
+ *
+ * Vorher hing hier ein Ausschnitt der Wortmarke mit `object-cover object-left`.
+ * Das Symbol als eigene Datei skaliert in jeder Groesse und braucht keinen
+ * Zuschnitt, der bei anderem Bild sofort falsch waere.
+ */
+function Brand({ collapsed }: { collapsed: boolean }) {
+  return (
+    <div
+      className={cn(
+        'flex shrink-0 items-center gap-2.5 px-4 pb-4 pt-5',
+        collapsed && 'justify-center px-0',
+      )}
+    >
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-gradient-to-br from-accent-500 to-accent-700">
+        <img
+          src="/partsunion-symbol-weiss.png"
+          alt="Partsunion"
+          width={19}
+          height={19}
+          className="size-[19px]"
+        />
+      </span>
+      {!collapsed && (
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate font-display text-sm font-bold tracking-[0.02em] text-text-primary">
+            Partsunion
+          </span>
+          <span className="font-mono text-[9px] font-semibold tracking-[0.18em] text-accent-500">
+            SALES CRM
+          </span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+function Nav({
+  activeView,
+  onNavigate,
+  collapsed,
+}: {
+  activeView: ViewId;
+  onNavigate: (view: ViewId) => void;
+  collapsed: boolean;
+}) {
+  return (
+    <nav className="flex-1 overflow-y-auto px-0 pb-3 pt-1.5" aria-label="Navigation">
+      {NAV_SECTIONS.map((section) => (
+        <div key={section.id} className="mb-5">
+          {!collapsed && (
+            <div className="mb-2 px-[22px] font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-text-muted">
+              {section.label}
+            </div>
+          )}
+          {collapsed && <div className="mx-3 mb-2 border-t border-border-subtle" />}
+          <ul className="space-y-0.5">
+            {section.items.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeView === item.view;
+              return (
+                <li key={item.view}>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate(item.view)}
+                    // Beim Ueberfahren schon holen. Betrifft nur die
+                    // Berichte — sie bringen 430 KB Diagrammbibliothek mit
+                    // und sind deshalb als einzige nicht vorgewaermt (siehe
+                    // App.tsx). Zwischen Ueberfahren und Klicken liegen ein
+                    // paar hundert Millisekunden; die reichen fuer den
+                    // groessten Teil des Downloads.
+                    onMouseEnter={item.view === 'reports' ? berichteVorwaermen : undefined}
+                    onFocus={item.view === 'reports' ? berichteVorwaermen : undefined}
+                    title={collapsed ? item.label : undefined}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={cn(
+                      // Redesign: 10 px Radius, Manrope halbfett, durchscheinende
+                      // Auflage beim Ueberfahren statt deckender Flaeche.
+                      'group relative mx-3 flex w-[calc(100%-1.5rem)] items-center rounded-[10px] py-[9px] text-[12.5px] font-semibold transition-colors',
+                      collapsed ? 'justify-center px-0' : 'gap-[11px] px-[11px]',
+                      isActive
+                        // Waagerechter Akzentverlauf, der nach rechts auslaeuft
+                        // text-text-primary, NICHT text-white: der Verlauf ist
+                        // durchscheinend, und im Hellmodus wäre weisse Schrift
+                        // darauf unsichtbar. Im Admin am Bild nachgemessen.
+                        ? 'bg-gradient-to-r from-accent-500/[0.16] via-accent-500/[0.03] to-transparent text-text-primary'
+                        : 'text-text-tertiary hover:bg-overlay/[0.05] hover:text-text-primary',
+                    )}
+                  >
+                    {isActive && (
+                      <span
+                        aria-hidden
+                        className="absolute inset-y-0 left-0 w-[2px] rounded-r-full bg-accent-500"
+                      />
+                    )}
+                    <Icon
+                      size={16}
+                      className={cn(
+                        'shrink-0 transition-colors',
+                        isActive ? 'text-accent-500' : 'text-text-faint group-hover:text-text-tertiary',
+                      )}
+                      aria-hidden
+                    />
+                    {!collapsed && <span className="flex-1 truncate text-left">{item.label}</span>}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+/**
+ * Fälliges-Feld nach dem Entwurf.
+ *
+ * Im Entwurf stand dort fest "11 Follow-ups fällig". Eine Zahl, die niemand
+ * berechnet, ist im Betrieb schlimmer als keine — man verlässt sich darauf.
+ * Hier kommt sie aus den Leads: alle mit `nextFollowUpDate` bis heute.
+ *
+ * Sind keine fällig, verschwindet das Feld. Ein bernsteinfarbener Kasten mit
+ * "0 fällig" ist ein Alarm ohne Anlass; er stumpft ab, und beim nächsten Mal
+ * sieht man den echten nicht.
+ */
+function FaelligFeld({ onNavigate }: { onNavigate: (v: ViewId) => void }) {
+  const [faellig, setFaellig] = useState<number | null>(null);
+
+  useEffect(() => {
+    let abgebrochen = false;
+    void getLeads()
+      .then((leads) => {
+        if (abgebrochen) return;
+        const heute = new Date();
+        heute.setHours(23, 59, 59, 999);
+        const n = (Array.isArray(leads) ? leads : []).filter((l) => {
+          if (!l.nextFollowUpDate) return false;
+          const d = new Date(l.nextFollowUpDate);
+          return !Number.isNaN(d.getTime()) && d <= heute;
+        }).length;
+        setFaellig(n);
+      })
+      // Kein Feld ist besser als eine falsche Zahl.
+      .catch(() => { if (!abgebrochen) setFaellig(null); });
+    return () => { abgebrochen = true; };
+  }, []);
+
+  if (!faellig) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate('leads')}
+      className="mb-2.5 flex w-full items-center gap-2.5 rounded-[11px] border border-warning/[0.16] bg-warning/[0.06] px-3 py-2.5 text-left transition-colors hover:border-warning/30"
+    >
+      <Clock size={15} className="shrink-0 text-warning" aria-hidden />
+      <span className="flex-1 text-[11px] font-semibold leading-tight text-warning">
+        {faellig === 1 ? '1 Follow-up fällig' : `${faellig} Follow-ups fällig`}
+      </span>
+    </button>
+  );
+}
+
+function Footer({
+  collapsed,
+  onToggle,
+  angeheftet,
+  onToggleAngeheftet,
+  onNavigate,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+  angeheftet: boolean;
+  onToggleAngeheftet: () => void;
+  onNavigate: (v: ViewId) => void;
+}) {
+  return (
+    <div className="shrink-0 border-t border-border-subtle p-3.5">
+      {!collapsed && <FaelligFeld onNavigate={onNavigate} />}
+      {/* Anheften — nur sichtbar, wenn die Leiste offen ist. Eingeklappt waere
+          der Knopf sinnlos: anheften heisst ja gerade "offen lassen". */}
+      {!collapsed && (
+        <button
+          type="button"
+          onClick={onToggleAngeheftet}
+          aria-pressed={angeheftet}
+          title={
+            angeheftet
+              ? 'Angeheftet — die Seitenleiste bleibt offen'
+              : 'Seitenleiste anheften, damit sie beim Navigieren offen bleibt'
+          }
+          className={cn(
+            'mb-1 flex w-full items-center justify-start gap-2 rounded-lg px-1 py-1.5 text-xs font-semibold transition-colors',
+            angeheftet
+              ? 'text-accent-500'
+              : 'text-text-muted hover:text-text-primary',
+          )}
+        >
+          {angeheftet ? <Pin size={16} className="shrink-0" /> : <PinOff size={16} className="shrink-0" />}
+          <span className="truncate">{angeheftet ? 'Angeheftet' : 'Anheften'}</span>
+        </button>
+      )}
+
+      <button
+        type="button"
+        onClick={onToggle}
+        title={collapsed ? 'Sidebar ausklappen (⌘\\)' : undefined}
+        className={cn(
+          'flex w-full items-center rounded-lg py-1.5 text-xs font-semibold text-text-muted transition-colors hover:text-text-primary',
+          collapsed ? 'justify-center px-0' : 'justify-start gap-2 px-1',
+        )}
+        aria-label={collapsed ? 'Sidebar ausklappen' : 'Sidebar einklappen'}
+      >
+        {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        {!collapsed && <span>Einklappen</span>}
+        {!collapsed && (
+          <kbd className="ml-auto rounded-[5px] bg-overlay/[0.05] px-1.5 py-[3px] font-mono text-[10px] font-medium text-text-muted">
+            ⌘\
+          </kbd>
+        )}
+      </button>
+    </div>
+  );
+}
