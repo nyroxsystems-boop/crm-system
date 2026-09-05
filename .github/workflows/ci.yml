@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Partsunion/Admin-Dashboard
-          ref: 02498ed098347f1d5a130ab63ba2e9a676ab0db9
+          ref: e39a828db39b181d3f31128aa2ac2aa900e6a37f
           path: Admin-Dashboard
           persist-credentials: false
 
