@@ -26,7 +26,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFi
 import { join } from 'node:path';
 import { render, waitFor } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * Nur die Datenschicht wird vorgetäuscht. Das Markup ist echt.
@@ -52,28 +52,36 @@ const LEADS = Array.from({ length: 42 }, (_, i) => ({
     assignedTo: i % 4 === 0 ? undefined : ['Aaron', 'Elias', 'Bardia'][i % 3],
     tags: [],
     nextFollowUpDate: i % 6 === 0 ? '2026-07-29' : undefined,
+    stageEnteredAt: i % 4 === 0 ? '2026-07-01T10:00:00.000Z' : '2026-09-01T10:00:00.000Z',
     createdAt: '2026-07-20T10:00:00.000Z',
     updatedAt: '2026-07-29T10:00:00.000Z',
 }));
 
 vi.mock('../app/utils/storage', () => ({
     getLeads: () => Promise.resolve(LEADS),
-    getSettings: () => ({ pipelineStages: ['Neu', 'Kontaktiert', 'Qualifiziert', 'Gewonnen', 'Verloren'].map((name, index) => ({ id: String(index), name, isActive: true, order: index, category: name === 'Gewonnen' ? 'won' : name === 'Verloren' ? 'lost' : 'open' })) }),
+    getSettings: () => ({ pipelineStages: ['Neu', 'Kontaktiert', 'Qualifiziert', 'Gewonnen', 'Verloren'].map((name, index) => ({ id: String(index), name, isActive: true, order: index, probability: [10, 30, 65, 100, 0][index], category: name === 'Gewonnen' ? 'won' : name === 'Verloren' ? 'lost' : 'open' })) }),
     getCurrentUser: () => ({ id: 'sales-1', username: 'aaron', name: 'Aaron Vogt', role: 'Vertrieb' }),
     getAppointments: () => Promise.resolve([
-        { id: 'a1', assignee_id: 'sales-1', assignee_name: 'Aaron', customer_name: 'Autoteile Nord GmbH',
-          title: 'Erstgespräch', start_at: new Date().toISOString(), duration_minutes: 30, status: 'confirmed' },
-        { id: 'a2', assignee_id: 'sales-1', assignee_name: 'Aaron', customer_name: 'Werkstatt Süd',
-          title: 'Angebot besprechen', start_at: new Date(Date.now() + 36e5).toISOString(), duration_minutes: 45, status: 'confirmed' },
+        { id: 'a1', type: 'quali', assignee_id: 'sales-1', assignee_name: 'Aaron Vogt', customer_name: 'Autoteile Nord GmbH', customer_email: 'nord@beispiel.invalid',
+          title: 'Erstgespräch', start_at: new Date().toISOString(), end_at: new Date(Date.now() + 30 * 60_000).toISOString(), duration_minutes: 30, status: 'confirmed' },
+        { id: 'a2', type: 'sales', assignee_id: 'sales-1', assignee_name: 'Aaron Vogt', customer_name: 'Werkstatt Süd', customer_email: 'sued@beispiel.invalid',
+          title: 'Angebot besprechen', start_at: new Date(Date.now() + 36e5).toISOString(), end_at: new Date(Date.now() + 36e5 + 45 * 60_000).toISOString(), duration_minutes: 45, status: 'proposed' },
     ]),
     // Form wie die echte Funktion: AppointmentAdmin[] mit `username`, nicht
     // bloss Strings. Mit Strings war `x.username` undefined und das Dashboard
     // stürzte ab — der Absturz war echt, nur ausgelöst durch eine falsche
     // Attrappe. Die Absicherung dagegen steht jetzt im Dashboard.
     getAppointmentAdmins: () => Promise.resolve([
-        { username: 'Aaron' }, { username: 'Elias' }, { username: 'Bardia' },
+        { id: 'sales-1', username: 'aaron', name: 'Aaron Vogt', email: 'aaron@beispiel.invalid' },
+        { id: 'sales-2', username: 'elias', name: 'Elias Nord', email: 'elias@beispiel.invalid' },
+        { id: 'sales-3', username: 'bardia', name: 'Bardia Süd', email: 'bardia@beispiel.invalid' },
     ]),
+    getTeams: () => Promise.resolve([{ id: 'team-1', name: 'Vertrieb Nord', active: true, memberIds: ['sales-1', 'sales-2'] }]),
     getStatusOptions: () => ['Neu', 'Kontaktiert', 'Qualifiziert', 'Gewonnen', 'Verloren'],
+    getLeadLists: () => Promise.resolve([]),
+    saveLead: vi.fn(), deleteLead: vi.fn(), createLeadList: vi.fn(), deleteLeadList: vi.fn(),
+    addLeadsToList: vi.fn(), removeLeadsFromList: vi.fn(), enrichMissingContacts: vi.fn(),
+    createAppointment: vi.fn(), updateAppointment: vi.fn(), cancelAppointment: vi.fn(), deleteAppointment: vi.fn(),
 }));
 
 // Diese Importe stehen bewusst NACH den vi.mock-Aufrufen: vitest hebt
@@ -82,6 +90,9 @@ vi.mock('../app/utils/storage', () => ({
 import { Dashboard } from '../app/components/Dashboard';
 import { Sidebar } from '../app/components/layout/Sidebar';
 import { Topbar } from '../app/components/layout/Topbar';
+import { PipelineView } from '../app/components/PipelineView';
+import { LeadsView } from '../app/components/LeadsView';
+import { KalenderView } from '../app/components/KalenderView';
 
 const DIST = join(process.cwd(), 'dist');
 const DIST_ASSETS = join(DIST, 'assets');
@@ -143,6 +154,7 @@ function seite(titel: string, css: string, markup: string, zusatz = ''): string 
 const NUTZER = { username: 'aaron', name: 'Aaron Vogt', role: 'Admin' } as never;
 
 describe('Bildprobe CRM-Redesign', () => {
+    afterEach(() => vi.unstubAllGlobals());
     const css = gebauteCss();
 
     it.skipIf(!css)('schreibt Hülle (Leiste + Kopfzeile) nach dist-probe/', () => {
@@ -248,6 +260,32 @@ describe('Bildprobe CRM-Redesign', () => {
         for (const abschnitt of ['Pipeline-Bestand', 'Termine heute', 'Datenqualität', 'Nächste Schritte']) {
             expect(text, `Abschnitt "${abschnitt}" fehlt`).toContain(abschnitt);
         }
+    });
+
+    it.skipIf(!css).each(['pipeline', 'leads', 'kalender'] as const)('schreibt die Arbeitsansicht %s mit geladenen Daten', async (view) => {
+        vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener: () => {}, removeEventListener: () => {} }));
+        const { container, unmount } = render(
+            <div className="flex h-screen h-dvh w-full overflow-hidden bg-canvas text-text-primary" data-workspace="crm">
+                <Sidebar activeView={view} onNavigate={() => {}} mobileOpen={false} onMobileOpenChange={() => {}} />
+                <div className="flex min-w-0 flex-1 flex-col">
+                    <Topbar title={view === 'pipeline' ? 'Pipeline' : view === 'kalender' ? 'Kalender' : 'Leads'} user={NUTZER} onOpenMobileSidebar={() => {}} onOpenPalette={() => {}} onRefresh={() => {}} onNewLead={() => {}} onLogout={() => {}} />
+                    <main className="min-h-0 min-w-0 flex-1 overflow-auto">{view === 'pipeline' ? <PipelineView /> : view === 'kalender' ? <KalenderView /> : <LeadsView />}</main>
+                </div>
+            </div>,
+        );
+        await waitFor(() => {
+            expect(container.textContent).toContain(view === 'kalender' ? 'Autoteile Nord GmbH' : 'Autoteile 1 GmbH');
+            expect(container.textContent).not.toContain('werden geladen');
+            if (view === 'kalender') expect(container.querySelector('[aria-label="Kalenderlage im sichtbaren Zeitraum"]')).not.toBeNull();
+        });
+        mkdirSync(AUSGABE, { recursive: true });
+        beiwerkKopieren();
+        // Preserve live select state, which innerHTML does not serialize itself.
+        container.querySelectorAll('select').forEach(select => {
+            Array.from(select.options).forEach(option => option.toggleAttribute('selected', option.selected));
+        });
+        writeFileSync(join(AUSGABE, `${view}.html`), seite(`Probe — CRM ${view}`, css!, container.innerHTML), 'utf8');
+        unmount();
     });
 
     it.skipIf(!css)('enthält für jede benutzte Klasse eine Regel in der CSS', () => {

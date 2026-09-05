@@ -5,8 +5,11 @@
  * artiger Flow: Termin anlegen → Kunde bekommt E-Mail-Einladung (+ .ics +
  * Bestätigungs-Link) → bestätigt selbst → Status springt auf „Bestätigt".
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAppointmentConflicts } from '../utils/useAppointmentConflicts';
+import { validateAppointmentDraft } from '../utils/appointmentForm';
+import { safeWebsiteUrl } from '../utils/safeUrl';
+import { useWorkspaceGuard } from '../utils/useWorkspaceGuard';
 import { CalendarTimeGrid } from './CalendarTimeGrid';
 import { AppointmentConflictReview } from './AppointmentConflictReview';
 import { LoadError } from './LoadError';
@@ -71,13 +74,18 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
   const [createOpen, setCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
+  const [formDirty, setFormDirty] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const saveLock = useRef(false);
   const [saving, setSaving] = useState(false);
   const [detail, setDetail] = useState<Appointment | null>(null);
   const [mode, setMode] = useState<CalendarMode>('week');
   const [teams, setTeams] = useState<CrmTeam[]>([]);
   const [teamFilter, setTeamFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('active');
   const review = useAppointmentConflicts(createOpen, `${form.date || ''}T${form.time || ''}`, form.durationMinutes || 30, form.assigneeId, editingId || undefined);
   const [loadError, setLoadError] = useState(false);
+  useWorkspaceGuard(createOpen && formDirty, saving);
 
   const grid = useMemo(() => calendarDays(cursor, mode), [cursor, mode]);
   const todayKey = toKey(new Date());
@@ -105,19 +113,29 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { getAppointmentAdmins().then(setAdmins).catch(() => undefined); getTeams().then(setTeams).catch(() => undefined); }, []);
 
+  const teamAppointments = useMemo(() => {
+    const team = teams.find((item) => item.id === teamFilter);
+    return appointments.filter((item) => !team || (item.assignee_id && team.memberIds.includes(item.assignee_id)));
+  }, [appointments, teams, teamFilter]);
+  const periodSummary = useMemo(() => ({
+    active: teamAppointments.filter(item => !['cancelled', 'declined', 'completed'].includes(item.status)).length,
+    confirmed: teamAppointments.filter(item => item.status === 'confirmed').length,
+    proposed: teamAppointments.filter(item => item.status === 'proposed').length,
+    unassigned: teamAppointments.filter(item => !item.assignee_id && !['cancelled', 'declined'].includes(item.status)).length,
+  }), [teamAppointments]);
   const byDay = useMemo(() => {
     const map: Record<string, Appointment[]> = {};
-    const team = teams.find((item) => item.id === teamFilter);
-    for (const a of appointments.filter((item) => !team || (item.assignee_id && team.memberIds.includes(item.assignee_id)))) (map[dayKeyOf(a.start_at)] ||= []).push(a);
+    for (const a of teamAppointments.filter(item => statusFilter === 'all' || (statusFilter === 'active' ? !['cancelled', 'declined', 'completed'].includes(item.status) : item.status === statusFilter))) (map[dayKeyOf(a.start_at)] ||= []).push(a);
     Object.values(map).forEach((l) => l.sort((x, y) => x.start_at.localeCompare(y.start_at)));
     return map;
-  }, [appointments, teams, teamFilter]);
+  }, [teamAppointments, statusFilter]);
   const selectedList = byDay[selectedDay] || [];
   const selDate = new Date(`${selectedDay}T00:00`);
 
   function openCreate(dayKey?: string) {
     setEditingId(null);
     setForm({ ...emptyForm(), date: dayKey || selectedDay || todayKey });
+    setFormDirty(false); setFormErrors({});
     setCreateOpen(true);
   }
   function openEdit(a: Appointment) {
@@ -128,40 +146,59 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
       customerPhone: a.customer_phone || '', durationMinutes: a.duration_minutes, location: a.location || '',
       meetingLink: a.meeting_link || '', sendInvite: false, date: dayKeyOf(a.start_at), time: timeOf(a.start_at),
     });
+    setFormDirty(false); setFormErrors({});
     setDetail(null);
     setCreateOpen(true);
   }
 
+  function changeForm(update: (current: FormState) => FormState) {
+    setFormDirty(true); setFormErrors({}); setForm(update);
+  }
+
+  function closeForm() {
+    if (saving) return;
+    if (formDirty && !window.confirm('Ungespeicherte Terminänderungen verwerfen?')) return;
+    setCreateOpen(false); setFormDirty(false); setFormErrors({});
+  }
+
   async function submitForm() {
-    if (!form.date || !form.time) { toast.error('Bitte Datum und Uhrzeit angeben.'); return; }
+    if (saveLock.current) return;
+    const errors = validateAppointmentDraft(form);
+    setFormErrors(errors);
+    if (Object.keys(errors).length) { toast.error('Bitte die markierten Termindaten prüfen.'); requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-appointment-form] [aria-invalid="true"]')?.focus()); return; }
     if (review.loading || review.error) { toast.error('Die Verfügbarkeit konnte noch nicht geprüft werden. Bitte erneut versuchen.'); return; }
     if (review.conflicts.length && !review.confirmed) { toast.error('Bitte die Terminüberschneidung prüfen und bestätigen.'); return; }
     const payload: AppointmentInput = {
       type: form.type, title: form.title?.trim() || undefined, notes: form.notes, assigneeId: form.assigneeId,
-      customerName: form.customerName, customerEmail: form.customerEmail, customerPhone: form.customerPhone,
-      durationMinutes: form.durationMinutes, location: form.location, meetingLink: form.meetingLink,
+      customerName: form.customerName?.trim(), customerEmail: form.customerEmail?.trim(), customerPhone: form.customerPhone?.trim(),
+      durationMinutes: form.durationMinutes, location: form.location?.trim(), meetingLink: form.meetingLink?.trim() ? safeWebsiteUrl(form.meetingLink) : undefined,
       start: `${form.date}T${form.time}`, sendInvite: form.sendInvite,
     };
-    setSaving(true);
+    saveLock.current = true; setSaving(true);
     try {
       if (!(await review.verify())) { toast.error('Die Verfügbarkeit hat sich geändert. Bitte den Konflikt prüfen.'); return; }
       if (editingId) {
         const res = await updateAppointment(editingId, { ...payload, resendInvite: form.sendInvite });
-        if (form.sendInvite && form.customerEmail && !res.inviteSent) toast.warning(`Termin aktualisiert. Einladung nicht versendet: ${res.inviteError || 'Bitte erneut versuchen.'}`);
-        else toast.success(res.inviteSent ? 'Termin und Einladung aktualisiert.' : 'Termin aktualisiert.');
+        if (res.calendarError) toast.warning(`Termin gespeichert, Teams-Synchronisierung ausstehend: ${res.calendarError}`);
+        else if (form.sendInvite && form.customerEmail && !res.inviteSent) toast.warning(`Termin aktualisiert. Einladung nicht versendet: ${res.inviteError || 'Bitte erneut versuchen.'}`);
+        else toast.success(res.calendarSynced ? 'Termin und Teams-Call aktualisiert.' : res.inviteSent ? 'Termin und Einladung aktualisiert.' : 'Termin aktualisiert.');
+        if (res.calendarDecision && !res.calendarDecision.eligible) toast.info('Kein Teams-Termin: Es wurde kein eindeutiger digitaler Kundentermin erkannt.');
       } else {
         const res = await createAppointment(payload);
-        if (res.inviteSent) toast.success('Termin angelegt · Einladung an den Kunden verschickt.');
+        if (res.calendarError) toast.warning(`Termin angelegt, Teams-Synchronisierung ausstehend: ${res.calendarError}`);
+        else if (res.inviteSent) toast.success(res.calendarSynced ? 'Termin und Teams-Call angelegt · Einladung verschickt.' : 'Termin angelegt · Einladung an den Kunden verschickt.');
         else if (form.sendInvite && form.customerEmail) toast.warning(`Termin angelegt, E-Mail nicht versendet: ${res.inviteError || 'unbekannt'}`);
         else toast.success('Termin angelegt.');
+        if (res.calendarDecision && !res.calendarDecision.eligible) toast.info('Bewusst ohne Teams angelegt: kein eindeutiger digitaler Kundentermin erkannt.');
       }
       setCreateOpen(false);
+      setFormDirty(false); setFormErrors({});
       setSelectedDay(form.date!);
       await load();
     } catch (e) {
       toast.error((e as Error)?.message || 'Speichern fehlgeschlagen.');
     } finally {
-      setSaving(false);
+      saveLock.current = false; setSaving(false);
     }
   }
 
@@ -200,17 +237,27 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
         title="Kalender"
         subtitle="Termine und Rückrufe koordinieren · Alle Uhrzeiten Europe/Berlin"
         actions={
-          <div className="flex items-center gap-2">
-            <select aria-label="Teamkalender" value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className={cn(inputSized, 'w-[160px]')}><option value="all">Alle Teams</option>{teams.filter((team) => team.active).map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select>
-            <select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} className={cn(inputSized, 'w-[180px]')}>
+          <div className="flex max-w-full flex-wrap items-center gap-2">
+            <select aria-label="Teamkalender" value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className={cn(inputSized, 'w-full sm:w-[160px]')}><option value="all">Alle Teams</option>{teams.filter((team) => team.active).map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select>
+            <select aria-label="Kalender nach Zuständigkeit filtern" value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} className={cn(inputSized, 'w-full sm:w-[180px]')}>
               <option value="all">Alle Zuständigen</option>
               {myAdminId && <option value="mine">Meine Termine</option>}
               {admins.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
+            <select aria-label="Kalender nach Status filtern" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={cn(inputSized, 'w-full sm:w-[170px]')}><option value="active">Aktive Termine</option><option value="all">Alle Status</option><option value="proposed">Vorgeschlagen</option><option value="confirmed">Bestätigt</option><option value="completed">Erledigt</option><option value="no_show">Nicht erschienen</option><option value="cancelled">Abgesagt</option></select>
             <Button onClick={() => openCreate()}><Plus className="size-4" /> Neuer Termin</Button>
           </div>
         }
       />
+
+      {!loading && !loadError && <section aria-label="Kalenderlage im sichtbaren Zeitraum" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          ['Aktiv', periodSummary.active, 'text-accent-500 bg-accent-500/10'],
+          ['Bestätigt', periodSummary.confirmed, 'text-status-success bg-status-success/10'],
+          ['Rückmeldung offen', periodSummary.proposed, 'text-status-warning bg-status-warning/10'],
+          ['Ohne Zuständigkeit', periodSummary.unassigned, 'text-status-danger bg-status-danger/10'],
+        ].map(([label, value, tone]) => <div key={label} className="flex items-center justify-between gap-3 rounded-xl border border-border-subtle bg-surface px-3 py-2.5 shadow-sm"><span className="text-xs font-medium text-text-secondary">{label}</span><span className={cn('rounded-lg px-2 py-1 text-sm font-bold tabular-nums', tone as string)}>{value}</span></div>)}
+      </section>}
 
       {loadError && <LoadError message="Termine konnten nicht geladen werden." onRetry={() => void load()} />}
       <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex rounded-md border border-border-subtle bg-surface p-1">{([{ id: 'day', label: 'Tag' }, { id: 'week', label: 'Woche' }, { id: 'month', label: 'Monat' }, { id: 'agenda', label: 'Agenda' }] as const).map((item) => <button key={item.id} aria-pressed={mode === item.id} onClick={() => setMode(item.id)} className={`rounded px-4 py-1.5 text-sm ${mode === item.id ? 'bg-elevated font-medium' : 'text-text-secondary'}`}>{item.label}</button>)}</div><p className="text-sm text-text-muted">Meeting-Links können hinterlegt werden. Microsoft-365-Synchronisierung ist nicht eingerichtet.</p></div>
@@ -359,13 +406,13 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
       {createOpen && (
         <Modal
           open={createOpen}
-          onClose={() => setCreateOpen(false)}
+          onClose={closeForm}
           title={editingId ? 'Termin bearbeiten' : 'Neuer Termin'}
           subtitle="Mit Kunden-E-Mail wird automatisch eine Einladung verschickt."
           size="md"
           footer={
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={saving}>Abbrechen</Button>
+              <Button variant="outline" onClick={closeForm} disabled={saving}>Abbrechen</Button>
               <Button onClick={submitForm} disabled={saving || review.loading || review.error}>
                 {saving ? <Loader2 className="size-4 animate-spin" /> : (editingId ? <Check className="size-4" /> : <Plus className="size-4" />)}
                 {editingId ? 'Speichern' : 'Anlegen'}
@@ -373,10 +420,10 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
             </div>
           }
         >
-          <div className="grid gap-3">
-            <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3" data-appointment-form>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Art">
-                <select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as AppointmentInput['type'] }))} className={inputSized}>
+                <select value={form.type} onChange={(e) => changeForm((f) => ({ ...f, type: e.target.value as AppointmentInput['type'] }))} className={inputSized}>
                   <option value="quali">Quali-Call</option>
                   <option value="sales">Sales-Call</option>
                   <option value="call">Anruf / Rückruf</option>
@@ -384,39 +431,39 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
                 </select>
               </Field>
               <Field label="Zuständig">
-                <select value={form.assigneeId || ''} onChange={(e) => setForm((f) => ({ ...f, assigneeId: e.target.value || undefined }))} className={inputSized}>
+                <select value={form.assigneeId || ''} onChange={(e) => changeForm((f) => ({ ...f, assigneeId: e.target.value || undefined }))} className={inputSized}>
                   <option value="">— Niemand —</option>
                   {admins.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </Field>
             </div>
-            <div className="grid grid-cols-[1fr_auto_auto] gap-3">
-              <Field label="Datum"><input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className={inputSized} /></Field>
-              <Field label="Uhrzeit"><input type="time" value={form.time} onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))} className={cn(inputSized, 'w-[120px]')} /></Field>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto_auto]">
+              <Field label="Datum"><input type="date" value={form.date} aria-invalid={Boolean(formErrors.date)} onChange={(e) => changeForm((f) => ({ ...f, date: e.target.value }))} className={inputSized} />{formErrors.date && <p role="alert" className="mt-1 text-xs text-status-danger">{formErrors.date}</p>}</Field>
+              <Field label="Uhrzeit"><input type="time" value={form.time} aria-invalid={Boolean(formErrors.time)} onChange={(e) => changeForm((f) => ({ ...f, time: e.target.value }))} className={cn(inputSized, 'w-full sm:w-[120px]')} />{formErrors.time && <p role="alert" className="mt-1 text-xs text-status-danger">{formErrors.time}</p>}</Field>
               <Field label="Dauer">
-                <select value={String(form.durationMinutes)} onChange={(e) => setForm((f) => ({ ...f, durationMinutes: Number(e.target.value) }))} className={cn(inputSized, 'w-[110px]')}>
+                <select value={String(form.durationMinutes)} onChange={(e) => changeForm((f) => ({ ...f, durationMinutes: Number(e.target.value) }))} className={cn(inputSized, 'w-full sm:w-[110px]')}>
                   {DURATIONS.map((d) => <option key={d} value={d}>{d} Min.</option>)}
                 </select>
               </Field>
             </div>
-            <Field label="Titel (optional)"><input value={form.title || ''} placeholder="z. B. Erstgespräch Werkstatt Müller" onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} className={inputSized} /></Field>
+            <Field label="Titel (optional)"><input value={form.title || ''} placeholder="z. B. Erstgespräch Werkstatt Müller" onChange={(e) => changeForm((f) => ({ ...f, title: e.target.value }))} className={inputSized} /></Field>
             <div className="border-t border-border-subtle pt-3 text-xs font-medium uppercase tracking-wide text-text-muted">Kunde</div>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Name"><input value={form.customerName || ''} placeholder="Firma / Ansprechpartner" onChange={(e) => setForm((f) => ({ ...f, customerName: e.target.value }))} className={inputSized} /></Field>
-              <Field label="Telefon"><input value={form.customerPhone || ''} placeholder="+49 …" onChange={(e) => setForm((f) => ({ ...f, customerPhone: e.target.value }))} className={inputSized} /></Field>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Name"><input value={form.customerName || ''} placeholder="Firma / Ansprechpartner" onChange={(e) => changeForm((f) => ({ ...f, customerName: e.target.value }))} className={inputSized} /></Field>
+              <Field label="Telefon"><input value={form.customerPhone || ''} placeholder="+49 …" onChange={(e) => changeForm((f) => ({ ...f, customerPhone: e.target.value }))} className={inputSized} /></Field>
             </div>
-            <Field label="E-Mail (für die Einladung)"><input type="email" value={form.customerEmail || ''} placeholder="kunde@firma.de" onChange={(e) => setForm((f) => ({ ...f, customerEmail: e.target.value }))} className={inputSized} /></Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Ort"><input value={form.location || ''} placeholder="Telefon / vor Ort" onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} className={inputSized} /></Field>
-              <Field label="Meeting-Link"><input value={form.meetingLink || ''} placeholder="https://meet…" onChange={(e) => setForm((f) => ({ ...f, meetingLink: e.target.value }))} className={inputSized} /></Field>
+            <Field label="E-Mail (für die Einladung)"><input type="email" value={form.customerEmail || ''} aria-invalid={Boolean(formErrors.customerEmail)} placeholder="kunde@firma.de" onChange={(e) => changeForm((f) => ({ ...f, customerEmail: e.target.value }))} className={inputSized} />{formErrors.customerEmail && <p role="alert" className="mt-1 text-xs text-status-danger">{formErrors.customerEmail}</p>}</Field>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Ort"><input value={form.location || ''} placeholder="Telefon / vor Ort" onChange={(e) => changeForm((f) => ({ ...f, location: e.target.value }))} className={inputSized} /></Field>
+              <Field label="Meeting-Link"><input value={form.meetingLink || ''} aria-invalid={Boolean(formErrors.meetingLink)} placeholder="https://meet…" onChange={(e) => changeForm((f) => ({ ...f, meetingLink: e.target.value }))} className={inputSized} />{formErrors.meetingLink && <p role="alert" className="mt-1 text-xs text-status-danger">{formErrors.meetingLink}</p>}</Field>
             </div>
             <Field label="Interne Notizen">
-              <textarea rows={2} value={form.notes || ''} placeholder="z. B. Teams-Beratung / vor Ort / telefonischer Rückruf" onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} className={cn(inputSized, 'h-auto py-2')} />
-              <p className="mt-1 text-xs text-text-muted">Einen vorhandenen Teams- oder Videolink im Feld Meeting-Link eintragen. Es wird kein Meeting automatisch erstellt.</p>
+              <textarea rows={2} value={form.notes || ''} placeholder="z. B. Teams-Beratung / vor Ort / telefonischer Rückruf" onChange={(e) => changeForm((f) => ({ ...f, notes: e.target.value }))} className={cn(inputSized, 'h-auto py-2')} />
+              <p className="mt-1 text-xs text-text-muted">Ein vorhandener Teams- oder Videolink wird übernommen. Bei angebundener Kalenderintegration kann für eindeutig digitale Kundentermine automatisch ein Teams-Call erzeugt werden.</p>
             </Field>
             <AppointmentConflictReview review={review} />
             <label className="flex items-center gap-2 rounded-md border border-border-subtle bg-canvas p-2.5 text-sm text-text-secondary">
-              <input type="checkbox" checked={!!form.sendInvite} onChange={(e) => setForm((f) => ({ ...f, sendInvite: e.target.checked }))} className="size-4 accent-accent-500" />
+              <input type="checkbox" checked={!!form.sendInvite} onChange={(e) => changeForm((f) => ({ ...f, sendInvite: e.target.checked }))} className="size-4 accent-accent-500" />
               <Mail className="size-4 text-text-muted" />
               {editingId ? 'Neue Einladung per E-Mail senden' : 'Einladung per E-Mail an den Kunden senden'}
             </label>
@@ -428,6 +475,7 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
       {detail && (() => {
         const tm = TYPE_META[detail.type] || TYPE_META.other;
         const sm = STATUS_META[detail.status] || STATUS_META.proposed;
+        const meetingHref = safeWebsiteUrl(detail.meeting_link || undefined);
         return (
           <Modal
             open={!!detail}
@@ -442,6 +490,7 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
             size="sm"
             footer={
               <div className="flex flex-wrap justify-end gap-2">
+                {meetingHref && <a href={meetingHref} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center gap-2 rounded-md bg-accent-600 px-3 text-sm font-medium text-white transition-colors hover:bg-accent-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500"><ExternalLink className="size-4" />Meeting öffnen</a>}
                 {detail.company_id && onOpenLead && (
                   <Button size="sm" variant="outline" onClick={() => { setDetail(null); onOpenLead(detail.company_id!); }}>
                     <ExternalLink className="size-4" /> Lead öffnen

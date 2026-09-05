@@ -60,9 +60,9 @@ export function Dashboard({ onOpenKalender, onOpenLead, onOpenLeads }: { onOpenK
   }, [leads]);
   const { working, due, missingNext, queue } = useMemo(() => {
     const working = scope === 'mine' ? active.filter((lead) => lead.assignedTo?.toLowerCase() === user?.username.toLowerCase()) : active;
-    const due = working.filter((lead) => lead.nextFollowUpDate && lead.nextFollowUpDate.slice(0, 10) <= today)
+    const due = working.filter((lead) => timestamp(lead.nextFollowUpDate) > 0 && lead.nextFollowUpDate!.slice(0, 10) <= today)
       .sort((a, b) => (a.nextFollowUpDate || '').localeCompare(b.nextFollowUpDate || '') || a.company.localeCompare(b.company));
-    const missingNext = working.filter((lead) => !lead.nextFollowUpDate)
+    const missingNext = working.filter((lead) => timestamp(lead.nextFollowUpDate) === 0)
       .sort((a, b) => timestamp(a.updatedAt) - timestamp(b.updatedAt) || a.company.localeCompare(b.company));
     return { working, due, missingNext, queue: [...due, ...missingNext].slice(0, 8) };
   }, [active, scope, today, user?.username]);

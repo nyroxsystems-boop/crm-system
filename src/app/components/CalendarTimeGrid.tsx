@@ -26,7 +26,7 @@ export function CalendarTimeGrid({ days, byDay, today, onOpen, onCreate }: { day
   const lastHour = Math.max(18, ...all.map((item) => Math.ceil(item.end / 60)));
   const hours = Array.from({ length: lastHour - firstHour }, (_, index) => firstHour + index);
   const height = hours.length * 56;
-  return <div className="max-h-[620px] overflow-auto" aria-label="Kalender mit Stundenraster"><div style={{ minWidth: days.length > 1 ? 850 : 300 }}>
+  return <>{days.length > 1 && <p className="border-b border-border-subtle bg-elevated/40 px-3 py-2 text-xs text-text-muted xl:hidden">Zeitraster horizontal verschieben, um weitere Tage zu sehen.</p>}<div className="max-h-[620px] overflow-auto" aria-label="Kalender mit Stundenraster" data-calendar-scroll><div style={{ minWidth: days.length > 1 ? 850 : 300 }}>
     <div className="sticky top-0 z-20 grid border-b border-border-subtle bg-surface" style={{ gridTemplateColumns: `56px repeat(${days.length}, minmax(0, 1fr))` }}><div className="px-2 py-3 text-xs text-text-muted">Berlin</div>{data.map(({ day, key }) => <div className={'border-l border-border-subtle px-2 py-3 text-center text-sm ' + (key === today ? 'font-semibold text-accent-500' : 'text-text-secondary')} key={key}>{day.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' })}</div>)}</div>
     <div className="grid" style={{ gridTemplateColumns: `56px repeat(${days.length}, minmax(0, 1fr))` }}>
       <div className="relative" style={{ height }}>{hours.map((hour) => <span key={hour} className="absolute right-2 text-xs tabular-nums text-text-muted" style={{ top: (hour - firstHour) * 56 + 4 }}>{String(hour).padStart(2, '0')}:00</span>)}</div>
@@ -35,5 +35,5 @@ export function CalendarTimeGrid({ days, byDay, today, onOpen, onCreate }: { day
         {rows.map(({ appointment, start, end, lane, lanes }) => <button key={appointment.id} type="button" onClick={() => onOpen(appointment)} aria-label={`${localAppointmentTime(appointment.start_at)} ${appointment.customer_name || appointment.title}, ${appointment.assignee_name || 'nicht zugewiesen'}`} title={`${localAppointmentTime(appointment.start_at)}–${localAppointmentTime(appointment.end_at)} · ${appointment.customer_name || appointment.title} · ${appointment.assignee_name || ''}`} className="absolute z-10 overflow-hidden rounded border border-accent-500/35 border-l-[3px] bg-elevated px-1.5 py-1 text-left text-xs leading-tight text-text-primary hover:border-accent-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500" style={{ top: (start - firstHour * 60) / 60 * 56, height: Math.max(27, (end - start) / 60 * 56 - 2), left: `calc(${lane / lanes * 100}% + 2px)`, width: `calc(${100 / lanes}% - 4px)` }}><span className="font-medium tabular-nums">{localAppointmentTime(appointment.start_at)}</span><span className="ml-1 font-semibold">{appointment.customer_name || appointment.title}</span>{end - start >= 45 && <span className="mt-1 block truncate text-text-secondary">{appointment.assignee_name || 'Nicht zugewiesen'}</span>}</button>)}
       </div>)}
     </div>
-  </div></div>;
+  </div></div></>;
 }

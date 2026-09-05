@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  Plus, Search, Filter, Trash2, Download, Mail, Phone, Upload, Clock, Globe,
+  Plus, Search, Filter, Trash2, Download, Mail, Phone, Upload, Globe,
   ArrowUp, ArrowDown, ChevronsUpDown, Table2, Columns3, X, Check, ChevronDown, ListPlus, Layers,
-  UserPlus, CalendarClock, Copy,
+  UserPlus, CalendarClock, Copy, ContactRound, ListTodo, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { sendBrochureBatch } from '../utils/brochure';
@@ -24,10 +24,13 @@ import {
   Card, PageHeader, Button, IconButton, Badge, EmptyState, StatusSelect, PriorityPill,
   inputClass, statusColor, cn,
 } from './ui-kit';
-import { matchesQuality, qualityOf, timestamp, localDayKey, type QualityFilter } from '../utils/leadQuality';
+import { matchesQualitySnapshot, qualityOf, timestamp, localDayKey, type QualityFilter } from '../utils/leadQuality';
 import { getCurrentUser } from '../utils/storage';
 import { safeWebsiteUrl } from '../utils/safeUrl';
 import { ARBEITSFLAECHE, KOPF_BEREICH, SPALTE_SCROLLT, VOLLE_HOEHE } from './dichte';
+import { useWorkspaceTime } from '../utils/useWorkspaceTime';
+import { useResultPage } from '../utils/useResultPage';
+import { LeadQuickAdd as QuickAdd } from './LeadQuickAdd';
 
 type SortField = 'company' | 'createdAt' | 'value' | 'updatedAt' | 'lastContact' | 'nextFollowUpDate';
 
@@ -105,6 +108,7 @@ export function LeadsView({
   const [activeSeg, setActiveSeg] = useState<string>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [view, setView] = useState<'table' | 'board'>('table');
+  const listScroll = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
@@ -192,8 +196,8 @@ export function LeadsView({
 
   const loadLeads = async () => {
     setLoading(true); setLoadError('');
-    try { const data = await getLeads(); setLeads(data); }
-    catch (error) { setLoadError(error instanceof Error ? error.message : 'Leads konnten nicht geladen werden.'); }
+    try { const data = await getLeads(); setLeads(data); return true; }
+    catch (error) { setLoadError(error instanceof Error ? error.message : 'Leads konnten nicht geladen werden.'); return false; }
     finally { setLoading(false); }
   };
   const loadLists = async () => setLists(await getLeadLists());
@@ -324,17 +328,9 @@ export function LeadsView({
   const quickAdd = async (company: string, status = defaultOpenStage()) => {
     const c = company.trim();
     if (!c) return;
-    const now = new Date().toISOString();
-    const optimistic: Lead = {
-      id: `tmp-${Date.now()}`, company: c, contactPerson: '', email: '', status,
-      source: 'Manuell', priority: 'Mittel', value: 0, tags: [], createdAt: now, updatedAt: now,
-    };
-    setLeads((prev) => [optimistic, ...prev]);
-    try {
-      await saveLead({ company: c, status, source: 'Manuell' });
-      await loadLeads();
-      toast.success(`„${c}“ hinzugefügt.`);
-    } catch { setLeads((prev) => prev.filter((l) => l.id !== optimistic.id)); toast.error('Lead wurde nicht angelegt.'); }
+    await saveLead({ company: c, status, source: 'Manuell' });
+    if (await loadLeads()) toast.success(`„${c}“ angelegt.`);
+    else toast.warning('Lead wurde angelegt. Nur die Liste konnte nicht aktualisiert werden. Bitte neu laden, nicht erneut anlegen.');
   };
 
   const handleSort = (field: SortField) => {
@@ -350,12 +346,23 @@ export function LeadsView({
   ) as string[];
   const assignedUsers = ['Alle Benutzer', ...adminNames, ...legacyAssignees, 'Nicht zugewiesen'];
 
-  /** Follow-up heute oder überfällig? (nextFollowUpDate ist "YYYY-MM-DD") */
-  const isDue = (l: Lead): boolean => {
-    if (!l.nextFollowUpDate) return false;
-    return l.nextFollowUpDate.slice(0, 10) <= localDayKey(new Date());
-  };
-  const dueCount = leads.filter(isDue).length;
+  const workspaceTime = useWorkspaceTime();
+  const today = localDayKey(new Date(workspaceTime));
+  const dueIds = useMemo(() => new Set(leads.filter(lead => timestamp(lead.nextFollowUpDate) > 0 && lead.nextFollowUpDate!.slice(0, 10) <= today).map(lead => lead.id)), [leads, today]);
+  const isDue = (lead: Lead): boolean => dueIds.has(lead.id);
+  const dueCount = dueIds.size;
+  const qualityIndex = useMemo(() => {
+    return new Map(leads.map(lead => [lead.id, qualityOf(lead, workspaceTime)]));
+  }, [leads, workspaceTime]);
+  const qualityCounts = useMemo(() => {
+    const result = { no_contact: 0, missing_person: 0, no_next_step: 0 };
+    for (const quality of qualityIndex.values()) {
+      if (!quality.contactable) result.no_contact++;
+      if (quality.missing.includes('Ansprechpartner')) result.missing_person++;
+      if (!quality.hasNextStep) result.no_next_step++;
+    }
+    return result;
+  }, [qualityIndex]);
 
   // Segment-Match (Quelle ODER eigene Liste).
   const segMatch = useMemo(() => {
@@ -367,14 +374,13 @@ export function LeadsView({
     return src.match;
   }, [activeSeg]);
 
-  const filteredLeads = leads
+  const filteredLeads = useMemo(() => {
+    const search = searchTerm.trim().toLocaleLowerCase('de');
+    return leads
     .filter((lead) => {
-      if (!segMatch(lead) || !matchesQuality(lead, qualityFilter)) return false;
+      if (!segMatch(lead) || !matchesQualitySnapshot(qualityIndex.get(lead.id)!, qualityFilter)) return false;
       const matchesSearch =
-        lead.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.contactPerson.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (lead.phone && lead.phone.toLowerCase().includes(searchTerm.toLowerCase()));
+        [lead.company, lead.contactPerson, lead.email, lead.phone].some(value => value?.toLocaleLowerCase('de').includes(search));
       const matchesStatus = statusFilter === 'all' || lead.status === statusFilter;
       const matchesPriority = priorityFilter === 'all' || lead.priority === priorityFilter;
       const matchesAssignedTo =
@@ -386,7 +392,7 @@ export function LeadsView({
           ? lead.dealerType === 'gebrauchtteile' || lead.dealerType === 'verwerter'
           : lead.dealerType === dealerTypeFilter);
       const matchesCountry = countryFilter === 'all' || countryCode(lead.country) === countryFilter;
-      const matchesDue = !dueOnly || isDue(lead);
+      const matchesDue = !dueOnly || dueIds.has(lead.id);
       return matchesSearch && matchesStatus && matchesPriority && matchesAssignedTo
         && matchesDealerType && matchesCountry && matchesDue;
     })
@@ -400,6 +406,8 @@ export function LeadsView({
       else if (sortField === 'lastContact') c = lastContactTime(a) - lastContactTime(b);
       return (sortDirection === 'asc' ? c : -c) || a.company.localeCompare(b.company, 'de') || a.id.localeCompare(b.id);
     });
+  }, [leads, segMatch, qualityIndex, qualityFilter, searchTerm, statusFilter, priorityFilter, assignedToFilter, dealerTypeFilter, countryFilter, dueOnly, dueIds, sortField, sortDirection]);
+  const pagination = useResultPage(filteredLeads, JSON.stringify([searchTerm, activeSeg, qualityFilter, statusFilter, priorityFilter, assignedToFilter, dealerTypeFilter, countryFilter, dueOnly, sortField, sortDirection]));
 
   // Segment-Counts (über alle Leads).
   const segCount = (key: string): number => {
@@ -411,7 +419,9 @@ export function LeadsView({
   // Bei gedocktem Lead-Panel wird die Tabelle schmal → nur Kernspalten zeigen
   // (Firma/Status/Letzter Kontakt), damit KEIN horizontaler Scroll entsteht.
   const compact = wideScreen && !!detailLead;
-  const visibleIds = filteredLeads.map((l) => l.id);
+  const visibleIds = pagination.rows.map((l) => l.id);
+  const filteredRealIds = filteredLeads.filter(lead => !lead.id.startsWith('tmp-')).map(lead => lead.id);
+  const allFilteredSelected = filteredRealIds.length > 0 && filteredRealIds.every(id => selected.has(id));
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
   const toggleOne = (id: string) => setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const toggleAllVisible = () => setSelected((prev) => {
@@ -556,7 +566,7 @@ export function LeadsView({
   };
 
   const formatRelativeTime = (date: string) => {
-    const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
+    const seconds = Math.floor((workspaceTime - new Date(date).getTime()) / 1000);
     if (seconds < 60) return 'Gerade eben';
     if (seconds < 3600) return `vor ${Math.floor(seconds / 60)}m`;
     if (seconds < 86400) return `vor ${Math.floor(seconds / 3600)}h`;
@@ -564,6 +574,7 @@ export function LeadsView({
     return new Date(date).toLocaleDateString('de-DE');
   };
   const activeFilters = [
+    ...(dueOnly ? [{ label: 'Fällige Wiedervorlagen', clear: () => setDueOnly(false) }] : []),
     ...(qualityFilter !== 'all' ? [{ label: QUALITY_FILTERS.find((item) => item.value === qualityFilter)?.label || qualityFilter, clear: () => setQualityFilter('all') }] : []),
     ...(statusFilter !== 'all' ? [{ label: statusFilter, clear: () => setStatusFilter('all') }] : []),
     ...(assignedToFilter !== 'all' ? [{ label: assignedToFilter, clear: () => setAssignedToFilter('all') }] : []),
@@ -591,7 +602,7 @@ export function LeadsView({
       <PageHeader title="Leads" subtitle="Kontakte qualifizieren und den nächsten Schritt planen." actions={<>
         <details className="relative" open={toolsOpen} onToggle={(event) => setToolsOpen(event.currentTarget.open)}>
           <summary className="flex h-9 cursor-pointer list-none items-center gap-2 rounded-md border border-border-subtle bg-surface px-3 text-sm">Werkzeuge <ChevronDown className="size-4" /></summary>
-          <div className="absolute right-0 z-40 mt-2 flex w-56 flex-col gap-1 rounded-md border border-border-subtle bg-surface p-2 shadow-modal">
+          <div className="absolute left-0 z-40 mt-2 flex w-56 flex-col gap-1 rounded-md border border-border-subtle bg-surface p-2 shadow-modal sm:left-auto sm:right-0">
             <Button variant="ghost" onClick={() => { setToolsOpen(false); setIsImportModalOpen(true); }}><Upload className="size-4" />Importieren</Button>
             <Button variant="ghost" onClick={() => { setToolsOpen(false); exportCsv(); }}><Download className="size-4" />Ansicht exportieren</Button>
             <Button variant="ghost" onClick={() => { setToolsOpen(false); setDuplicatesOpen(true); }}><Copy className="size-4" />Dubletten prüfen</Button>
@@ -600,7 +611,7 @@ export function LeadsView({
         </details>
         <Button onClick={() => { setEditingLead(null); setEditFromDetail(false); setIsModalOpen(true); }}><Plus className="size-4" />Neuer Lead</Button>
       </>} />
-      <div className="rounded-lg border border-border-subtle bg-surface">
+      <div className="rounded-xl border border-border-subtle bg-surface shadow-sm">
         <div className="flex flex-wrap items-center gap-2 p-3">
           <div className="relative min-w-48 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-text-muted" /><input aria-label="Leads durchsuchen" placeholder="Firma, Kontakt oder E-Mail suchen" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} className={cn(inputClass, 'h-9 pl-9')} /></div>
           <select aria-label="Gespeicherte Ansicht" className={cn(inputClass, 'w-full sm:w-48')} value={activeSavedView} onChange={(event) => selectSavedView(event.target.value)}><option value="">Persönliche Ansichten</option>{savedViews.map((saved) => <option key={saved.name} value={saved.name}>{saved.name}</option>)}</select>
@@ -621,7 +632,7 @@ export function LeadsView({
           <div><p className="mb-2 text-sm text-text-secondary">Quelle oder Liste</p><SegmentBar active={activeSeg} onSelect={(key) => { setActiveSeg(key); clearSelection(); }} lists={lists} segCount={segCount} onCreate={createAndAssign} onDeleteList={handleDeleteList} /></div>
           <div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={saveView}>Als persönliche Ansicht speichern</Button><Button size="sm" variant="ghost" onClick={resetFilters}>Filter zurücksetzen</Button>{activeSavedView && <Button size="sm" variant="ghost" onClick={() => { const next = savedViews.filter((saved) => saved.name !== activeSavedView); try { localStorage.setItem(viewStorageKey(), JSON.stringify(next)); setSavedViews(next); setActiveSavedView(''); } catch { toast.error('Ansicht konnte nicht entfernt werden.'); } }}>Ansicht entfernen</Button>}</div>
         </div>}
-        {activeFilterCount > 0 && !filtersOpen && <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle px-3 py-2 text-sm text-text-secondary">{activeFilters.map((filter) => <button key={filter.label} onClick={filter.clear} className="inline-flex items-center gap-1 rounded border border-border-subtle px-2 py-1">{filter.label}<X className="size-3" /><span className="sr-only">entfernen</span></button>)}</div>}
+        {activeFilterCount > 0 && !filtersOpen && <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle px-3 py-2 text-sm text-text-secondary">{activeFilters.map((filter) => <button key={filter.label} onClick={filter.clear} className="inline-flex items-center gap-1.5 rounded-md border border-accent-500/20 bg-accent-500/10 px-2 py-1 text-accent-500">{filter.label}<X className="size-3" /><span className="sr-only">entfernen</span></button>)}<button onClick={resetFilters} className="px-2 py-1 text-xs text-text-muted hover:text-text-primary">Alle zurücksetzen</button></div>}
       </div>
 
       {loadError && <LoadError message={loadError} onRetry={() => void loadLeads()} />}
@@ -650,20 +661,40 @@ export function LeadsView({
           Vorher scrollten Seite und Maske gleichzeitig, und wer in der Maske
           ans Ende kam, schob unversehens die Seite weiter. */}
       <div className={cn(ARBEITSFLAECHE, 'mx-auto w-full max-w-[1620px]')}>
-        <div className={cn(SPALTE_SCROLLT, 'min-w-0 flex-1 space-y-3.5 pb-2')}>
-      <div className="flex items-center justify-between px-1 py-3 text-sm text-text-muted"><span>{loading ? 'Wird geladen…' : loadError ? 'Daten nicht verfügbar' : `${filteredLeads.length} von ${leads.length} Leads`}</span><span className="hidden sm:inline">Klicke auf eine Firma, um den Lead zu bearbeiten.</span></div>
+        <div ref={listScroll} className={cn(SPALTE_SCROLLT, 'min-w-0 flex-1 space-y-3.5 pb-2 pt-3')}>
+      {!loading && !loadError && <section aria-label="Datenqualität im gesamten Leadbestand" className="rounded-xl border border-border-subtle bg-surface p-3">
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2"><h2 className="text-xs font-semibold text-text-secondary">Datenpflege · gesamter Bestand</h2><span className="text-xs text-text-muted">Erfasste Angaben, keine externe Verifizierung</span></div>
+        <div className="flex flex-wrap gap-2">{([
+          { key: 'no_contact', label: 'Kontaktweg fehlt', icon: Phone, tone: 'text-status-danger' },
+          { key: 'missing_person', label: 'Ansprechpartner fehlt', icon: ContactRound, tone: 'text-status-warning' },
+          { key: 'no_next_step', label: 'Nächster Schritt fehlt', icon: ListTodo, tone: 'text-accent-500' },
+        ] as const).map(({ key, label, icon: Icon, tone }) => <button key={key} aria-pressed={qualityFilter === key} onClick={() => setQualityFilter(qualityFilter === key ? 'all' : key)} className={cn('flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors', qualityFilter === key ? 'border-accent-500 bg-accent-500/10 text-accent-500' : 'border-border-subtle text-text-secondary hover:bg-elevated')}><Icon className={cn('size-4', tone)} aria-hidden />{label}<span className="ml-1 font-semibold tabular-nums">{qualityCounts[key]}</span></button>)}</div>
+      </section>}
+      <div className="flex items-center justify-between gap-3 px-1 py-2 text-sm text-text-muted"><span role="status" className="font-medium text-text-secondary">{loading ? 'Wird geladen…' : loadError ? 'Daten nicht verfügbar' : `${filteredLeads.length} von ${leads.length} Leads`}</span><span className="hidden text-xs sm:inline">Firma öffnen → Kontaktverlauf & nächste Schritte</span></div>
 
       {view === 'board' ? (
         <BoardView statuses={statuses} leads={filteredLeads} onOpen={setDetailLead} onQuickAdd={quickAdd} />
       ) : (
         <>
+          {!loading && !loadError && filteredLeads.length > 0 && <nav aria-label="Lead-Ergebnisseiten" className="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-border-subtle bg-surface px-3 py-2 shadow-sm">
+            <span className="mr-auto text-xs font-medium tabular-nums text-text-secondary">{pagination.start + 1}–{pagination.end} von {filteredLeads.length}</span>
+            <div className="flex flex-wrap items-center gap-2">
+            <select aria-label="Leads pro Seite" className={cn(inputClass, 'h-9 w-auto text-xs')} value={pagination.size} onChange={event => { pagination.setSize(Number(event.target.value)); listScroll.current?.scrollTo?.({ top: 0 }); }}><option value={25}>25 pro Seite</option><option value={50}>50 pro Seite</option><option value={100}>100 pro Seite</option></select>
+            <div className="flex shrink-0 items-center gap-1">
+            <IconButton aria-label="Vorherige Lead-Seite" disabled={pagination.page === 1} onClick={() => { pagination.setPage(pagination.page - 1); listScroll.current?.scrollTo?.({ top: 0 }); }}><ChevronLeft className="size-4" /></IconButton>
+            <span className="text-xs tabular-nums" aria-label={`Seite ${pagination.page} von ${pagination.pages}`}>{pagination.page} / {pagination.pages}</span>
+            <IconButton aria-label="Nächste Lead-Seite" disabled={pagination.page === pagination.pages} onClick={() => { pagination.setPage(pagination.page + 1); listScroll.current?.scrollTo?.({ top: 0 }); }}><ChevronRight className="size-4" /></IconButton>
+            </div>
+            </div>
+          </nav>}
+          {selectedRealIds.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-accent-500/20 bg-accent-500/10 px-3 py-2 text-xs text-text-secondary"><span>{selectedRealIds.length} Leads ausgewählt, auch auf anderen Seiten.</span>{!allFilteredSelected && <button className="font-semibold text-accent-500 hover:underline" onClick={() => setSelected(previous => new Set([...previous, ...filteredRealIds]))}>Alle {filteredRealIds.length} gefilterten Leads auswählen</button>}<button className="ml-auto text-text-muted hover:text-text-primary" onClick={clearSelection}>Auswahl aufheben</button></div>}
           <Card className="hidden overflow-visible md:block">
             <div className="overflow-x-auto">
               <table className="crm-lead-table w-full text-sm" data-compact={compact}>
                 <thead>
                   <tr className="border-b border-border-subtle bg-elevated/50">
                     <th className="w-10 px-3 py-2.5">
-                      <CheckBox checked={allVisibleSelected} onChange={toggleAllVisible} ariaLabel="Alle auswählen" />
+                      <CheckBox checked={allVisibleSelected} mixed={!allVisibleSelected && visibleIds.some(id => selected.has(id))} onChange={toggleAllVisible} ariaLabel="Alle Leads auf dieser Seite auswählen" />
                     </th>
                     <SortHead label="Firma" field="company" sortField={sortField} dir={sortDirection} onSort={handleSort} />
                     {!compact && <th className="label-technical px-3 py-2.5 text-left text-text-muted">Händler / Land</th>}
@@ -677,8 +708,8 @@ export function LeadsView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border-subtle">
-                  {filteredLeads.map((lead) => {
-                    const quality = qualityOf(lead);
+                  {pagination.rows.map((lead) => {
+                    const quality = qualityIndex.get(lead.id)!;
                     const website = safeWebsiteUrl(lead.website || lead.websiteUrl);
                     const isSel = selected.has(lead.id);
                     return (
@@ -695,7 +726,7 @@ export function LeadsView({
                           <div className="flex items-center gap-2.5">
                             <div className="flex size-9 flex-shrink-0 items-center justify-center rounded-md bg-accent-500/15 font-semibold text-accent-500">{lead.company[0]}</div>
                             <div className="min-w-0">
-                              <button className="block max-w-full truncate text-left font-medium text-text-primary hover:text-accent-500 focus-visible:underline" aria-label={`Lead ${lead.company} öffnen`} onClick={(event) => { event.stopPropagation(); setDetailLead(lead); }}>{lead.company}</button>
+                              <button className="block max-w-full truncate text-left font-semibold text-text-primary hover:text-accent-500 focus-visible:underline" aria-label={`Lead ${lead.company} öffnen`} onClick={(event) => { event.stopPropagation(); setDetailLead(lead); }}>{lead.company}</button>
                               <div className="truncate text-xs text-text-muted">{lead.industry || lead.niche || lead.city || 'Keine Branche'}</div>
                               {website && (
                                 <a href={website} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
@@ -802,7 +833,7 @@ export function LeadsView({
 
           {/* Mobile Cards */}
           <div className="space-y-3 md:hidden">
-            {filteredLeads.map((lead) => <LeadMobileCard key={lead.id} lead={lead} selected={selected.has(lead.id)} statuses={statuses} due={isDue(lead)}
+            {pagination.rows.map((lead) => <LeadMobileCard key={lead.id} lead={lead} selected={selected.has(lead.id)} statuses={statuses} due={isDue(lead)}
               onSelect={() => toggleOne(lead.id)} onOpen={() => setDetailLead(lead)} onEdit={() => handleEditClick(lead)} onDelete={() => handleDeleteLead(lead.id)} onStatus={(status) => void changeStatus(lead, status)} />)}
             {!loading && !loadError && filteredLeads.length === 0 && (
               <Card><EmptyState icon={<Search className="size-5" />} title="Keine Leads gefunden" description="Andere Ansicht/Filter wählen." /></Card>
@@ -872,20 +903,20 @@ export function LeadsView({
 }
 
 /* ── Checkbox ──────────────────────────────────────────────── */
-function CheckBox({ checked, onChange, ariaLabel }: { checked: boolean; onChange: () => void; ariaLabel?: string }) {
+function CheckBox({ checked, mixed = false, onChange, ariaLabel }: { checked: boolean; mixed?: boolean; onChange: () => void; ariaLabel?: string }) {
   return (
     <button
       type="button"
       role="checkbox"
-      aria-checked={checked}
+      aria-checked={mixed ? 'mixed' : checked}
       aria-label={ariaLabel}
       onClick={(e) => { e.stopPropagation(); onChange(); }}
       className={cn(
         'flex size-[18px] shrink-0 items-center justify-center rounded border transition-colors',
-        checked ? 'border-accent-500 bg-accent-500 text-white' : 'border-border-strong bg-canvas hover:border-accent-500',
+        checked || mixed ? 'border-accent-500 bg-accent-500 text-white' : 'border-border-strong bg-canvas hover:border-accent-500',
       )}
     >
-      {checked && <Check className="size-3" strokeWidth={3} />}
+      {mixed ? <span aria-hidden className="h-0.5 w-2.5 bg-current" /> : checked && <Check className="size-3" strokeWidth={3} />}
     </button>
   );
 }
@@ -1059,7 +1090,7 @@ function ViewToggle({ view, onChange }: { view: 'table' | 'board'; onChange: (v:
 }
 
 /* ── Board (Gruppen nach Status) ──────────────────────────── */
-function BoardView({ statuses, leads, onOpen, onQuickAdd }: { statuses: string[]; leads: Lead[]; onOpen: (lead: Lead) => void; onQuickAdd: (company: string, status: string) => void; }) {
+function BoardView({ statuses, leads, onOpen, onQuickAdd }: { statuses: string[]; leads: Lead[]; onOpen: (lead: Lead) => void; onQuickAdd: (company: string, status: string) => Promise<void>; }) {
   const groups = statuses.map((status) => ({ status, items: leads.filter((l) => l.status === status) }));
   return (
     <div className="space-y-4">
@@ -1068,7 +1099,7 @@ function BoardView({ statuses, leads, onOpen, onQuickAdd }: { statuses: string[]
   );
 }
 
-function BoardGroup({ status, items, onOpen, onQuickAdd }: { status: string; items: Lead[]; onOpen: (lead: Lead) => void; onQuickAdd: (company: string, status: string) => void; }) {
+function BoardGroup({ status, items, onOpen, onQuickAdd }: { status: string; items: Lead[]; onOpen: (lead: Lead) => void; onQuickAdd: (company: string, status: string) => Promise<void>; }) {
   const [collapsed, setCollapsed] = useState(false);
   const sum = items.reduce((s, l) => s + (l.value || 0), 0);
   const color = statusColor(status);
@@ -1104,29 +1135,6 @@ function BoardGroup({ status, items, onOpen, onQuickAdd }: { status: string; ite
         </div>
       )}
     </Card>
-  );
-}
-
-/* ── Quick-Add ────────────────────────────────────────────── */
-function QuickAdd({ onAdd, placeholder = '+ Lead hinzufügen…' }: { onAdd: (company: string) => void; placeholder?: string }) {
-  const [open, setOpen] = useState(false);
-  const [value, setValue] = useState('');
-  const commit = () => { if (value.trim()) onAdd(value); setValue(''); setOpen(false); };
-  if (!open) {
-    return (
-      <button type="button" onClick={() => setOpen(true)} className="flex items-center gap-1.5 text-sm text-text-muted transition-colors hover:text-text-secondary">
-        <Plus className="size-4" />{placeholder}
-      </button>
-    );
-  }
-  return (
-    <div className="flex items-center gap-2">
-      <input autoFocus value={value} onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setValue(''); setOpen(false); } }}
-        placeholder="Firmenname…" className={cn(inputClass, 'h-8 max-w-xs')} />
-      <IconButton className="size-8" onClick={commit} aria-label="Hinzufügen"><Check className="size-4" /></IconButton>
-      <IconButton className="size-8" onClick={() => { setValue(''); setOpen(false); }} aria-label="Abbrechen"><X className="size-4" /></IconButton>
-    </div>
   );
 }
 

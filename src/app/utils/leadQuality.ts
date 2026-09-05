@@ -18,10 +18,14 @@ export function qualityOf(lead: Lead, now = Date.now()) {
 }
 export type QualityFilter = 'all' | 'complete' | 'no_contact' | 'missing_person' | 'no_next_step' | 'stale';
 export function matchesQuality(lead: Lead, filter: QualityFilter, now = Date.now()): boolean {
-  const quality = qualityOf(lead, now);
+  if (filter === 'all') return true;
+  return matchesQualitySnapshot(qualityOf(lead, now), filter);
+}
+/** Reuse the same assessment for filter, count and table cell. */
+export function matchesQualitySnapshot(quality: ReturnType<typeof qualityOf>, filter: QualityFilter): boolean {
   if (filter === 'complete') return quality.missing.length === 0;
   if (filter === 'no_contact') return !quality.contactable;
-  if (filter === 'missing_person') return !lead.contactPerson?.trim();
+  if (filter === 'missing_person') return quality.missing.includes('Ansprechpartner');
   if (filter === 'no_next_step') return !quality.hasNextStep;
   if (filter === 'stale') return quality.stale;
   return true;

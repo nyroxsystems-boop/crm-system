@@ -69,7 +69,13 @@ describe('Aufbau der Arbeitsfläche', () => {
         // und ihre Hoehe musste aus Kopfzeile und Klebeabstand errechnet
         // werden. Zwei Zahlen, die auseinanderliefen; die Fusszeile mit dem
         // Loeschen-Knopf lag dadurch 24 px unter dem Bildschirmrand.
-        expect(LEADS, 'die Maske klebt wieder').not.toMatch(/sticky top-/);
+        // Die Seitennavigation darf innerhalb der Listenspalte sichtbar bleiben.
+        // Entscheidend ist, dass die Detailmaske selbst nicht wieder klebt.
+        const detailspalten = (LEADS.match(/<aside\b[\s\S]*?<\/aside>/g) ?? [])
+            .filter(spalte => spalte.includes('<LeadDetailModal'));
+        expect(detailspalten, 'keine Detailspalte gefunden').toHaveLength(1);
+        expect(detailspalten[0], 'die Detailspalte klebt wieder').not.toMatch(/\bsticky\b/);
+        expect(MASKE, 'die Maske klebt wieder').not.toMatch(/\bsticky\b/);
         expect(MASKE, 'da wird wieder eine Hoehe ausgerechnet')
             .not.toMatch(/max-h-\[calc\(100[dv]h/);
         expect(MASKE, 'die Maske fuellt ihre Spalte nicht')
