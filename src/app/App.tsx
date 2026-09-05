@@ -14,8 +14,8 @@ import { ansichtenVorwaermen } from './vorwaermen';
 
 /**
  * Die Befehlspalette oeffnet erst auf ⌘K. Sie eager zu laden hiess: die
- * Bewegungsbibliothek (AnimatePresence) beim Start mitzuziehen, fuer ein
- * Fenster, das die meisten nie aufmachen.
+ * Befehlspalette und cmdk beim Start mitzuziehen, fuer ein Fenster, das die
+ * meisten nie aufmachen. Die Einblendung selbst ist reines CSS.
  */
 const CommandPalette = lazy(() =>
   import('./components/CommandPalette').then(({ CommandPalette }) => ({ default: CommandPalette })),

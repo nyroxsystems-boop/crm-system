@@ -54,10 +54,9 @@ export function ansichtenVorwaermen(): void {
         void import('./components/Settings').catch(() => {});
         void import('./components/UserManagement').catch(() => {});
         void import('./components/PipelineSettings').catch(() => {});
-        // Die Befehlspalette ist mit 134 KB die schwerste hier — sie bringt
-        // als einzige noch die Bewegungsbibliothek mit. Sie ist trotzdem
-        // dabei, weil sie ueber ⌘K aufgeht: eine Tastenkombination bietet
-        // kein Ueberfahren, auf das man das Holen legen koennte.
+        // Die Befehlspalette bleibt wegen cmdk nachgeladen. Sie ist trotzdem
+        // im Leerlauf dabei, weil sie ueber ⌘K aufgeht: eine Tastenkombination
+        // bietet kein Ueberfahren, auf das man das Holen legen koennte.
         void import('./components/CommandPalette').catch(() => {});
     };
     const ric = (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;

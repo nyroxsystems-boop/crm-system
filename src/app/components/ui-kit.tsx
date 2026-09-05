@@ -533,8 +533,8 @@ type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
 type ButtonSize = 'sm' | 'md';
 
 const BTN_BASE =
-  'inline-flex items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap ' +
-  'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50 ' +
+  'inline-flex items-center justify-center gap-2 rounded-lg font-semibold whitespace-nowrap ' +
+  'transition-[background-color,border-color,color,box-shadow,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50 ' +
   'disabled:opacity-50 disabled:pointer-events-none';
 
 const BTN_VARIANT: Record<ButtonVariant, string> = {
@@ -547,7 +547,7 @@ const BTN_VARIANT: Record<ButtonVariant, string> = {
    * als Regel fest ("Weiss auf accent-500 ist NICHT genug"). Dieser Knopf war
    * die eine Stelle, die sich nicht daran gehalten hat.
    */
-  primary: 'bg-accent-600 text-white hover:bg-accent-700',
+  primary: 'bg-accent-600 text-white shadow-sm hover:-translate-y-px hover:bg-accent-700 hover:shadow-card-hover',
   secondary: 'bg-elevated text-text-primary border border-border-subtle hover:bg-elevated-hover hover:border-border-strong',
   outline: 'bg-transparent text-text-primary border border-border-subtle hover:bg-elevated hover:border-border-strong',
   ghost: 'bg-transparent text-text-secondary hover:bg-elevated hover:text-text-primary',
@@ -731,7 +731,7 @@ export function PageHeader({
           <p className="mt-1.5 text-[13px] leading-[1.45] text-text-tertiary">{subtitle}</p>
         )}
       </div>
-      {actions && <div className="flex flex-shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex max-w-full flex-shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </header>
   );
 }

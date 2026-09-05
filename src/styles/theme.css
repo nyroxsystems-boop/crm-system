@@ -75,11 +75,11 @@
      * Abstand über den Schatten. Gleichlautend mit
      * Admin-Dashboard/src/design-system/tokens.css.
      */
-    --karte-von:        rgb(255 255 255 / 0.045);
-    --karte-bis:        rgb(255 255 255 / 0.012);
-    --karte-rand:       rgb(255 255 255 / 0.075);
-    --karte-rand-hover: rgb(255 255 255 / 0.16);
-    --karte-schatten:   none;
+    --karte-von:        #181E2B;
+    --karte-bis:        #131925;
+    --karte-rand:       var(--border);
+    --karte-rand-hover: var(--border-strong);
+    --karte-schatten:   var(--shadow-card);
 
     /* Begrüßungsbereich — Verlauf und Lichtschein je Modus. Die Werte standen
        fest verdrahtet im Baustein (`rgba(92,141,255,.16)`) und reagierten
@@ -98,22 +98,22 @@
     --schein-2: 0.07;
 
     /* Flächen und Linien — Redesign */
-    --bg-canvas: #08090C;
-    --bg-surface: #0F1015;
-    --bg-elevated: #181A21;
-    --bg-elevated-hover: #21232C;
-    --border: #1D1F26;
-    --border-strong: #2F323C;
+    --bg-canvas: #0D121C;
+    --bg-surface: #151B28;
+    --bg-elevated: #1E2734;
+    --bg-elevated-hover: #283443;
+    --border: #2E3848;
+    --border-strong: #505E73;
 
-    --text-primary: #E9EBF1;
-    --text-secondary: #C2C7D6;
+    --text-primary: #F0F2F5;
+    --text-secondary: #CBCFD8;
     /* Neu aus dem Redesign: tertiary für Beschriftungen, faint für SYMBOLE
        und Linien. faint ist KEINE Textstufe — auf 4,5 angehoben läge sie
        neben muted und beide sähen gleich aus (im Admin nachgemessen: 1,08
        Abstand). Kleine Mono-Versalien nehmen deshalb muted. */
-    --text-tertiary: #8A90A3;
-    --text-muted: #7D8397;
-    --text-faint: #5D6479;
+    --text-tertiary: #AAB0BD;
+    --text-muted: #9DA3AF;
+    --text-faint: #737E91;
 
     /* Accent — Deep Signal Blue */
     --accent-50: #EBF1FF;
@@ -275,10 +275,10 @@
        Dritten gehen. */
     --font-display: 'Space Grotesk Variable', 'Space Grotesk', system-ui, sans-serif;
     --font-body: 'Manrope Variable', 'Manrope', system-ui, sans-serif;
-    --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', 'SF Mono', monospace;
+    --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
 
     /* Radius */
-    --radius: 8px;
+    --radius: 12px;
 
     /* Legacy-Kompatibilität (Shadcn/Radix HSL-Werte) */
     --background: 220 10% 5%;
@@ -438,7 +438,7 @@ html.light {
     --prio-mittel-fg:   #8A7431;
     --prio-niedrig-fg:  #6E767F;
 
-    --bg-canvas: #EFF1F9;
+    --bg-canvas: #EEF2F8;
     --bg-surface: #FFFFFF;
     --bg-elevated: #F7F8FC;
     --bg-elevated-hover: #E9ECF6;
@@ -455,13 +455,13 @@ html.light {
     --accent-500: #194BF0;
     --accent-600: #0D3CD3;
     --accent-700: #0D32AB;
-    --success: #068449;
-    --warning: #B65C02;
+    --success: #067640;
+    --warning: #A45102;
     /* Identisch zum Dunkelmodus; nur die umgebende Oberfläche wechselt. */
     --dealer-used: #F28A2B;
     --dealer-used-foreground: #111827;
-    --danger: #E31D16;
-    --info: #0579B3;
+    --danger: #CD1A14;
+    --info: #056CA0;
     --success-muted: rgba(28, 120, 80, 0.1);
     --warning-muted: rgba(151, 93, 12, 0.1);
     --danger-muted:  rgba(193, 31, 31, 0.1);

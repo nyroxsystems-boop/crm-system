@@ -36,6 +36,12 @@
 /** Innenabstand einer Karte. 16 px statt 20–32. */
 export const KARTE_INNEN = 'p-4';
 
+/** Shared workspace hierarchy; compact tables retain KARTE_INNEN. */
+export const WORKSPACE_CARD_INNER = 'p-5';
+export const WORKSPACE_METRIC = 'min-h-[132px] p-3 sm:p-5';
+export const WORKSPACE_METRIC_VALUE = 'text-[clamp(1.65rem,2.3vw,2.15rem)]';
+export const WORKSPACE_METRIC_VALUE_LONG = 'text-[clamp(1rem,5.2vw,1.65rem)] sm:text-[clamp(1.65rem,2.3vw,2.15rem)]';
+
 /** Kennzahl-Kachel: Beschriftung oben, Wert darunter. */
 export const KACHEL = 'min-h-[68px] gap-2.5 p-4';
 
@@ -48,7 +54,7 @@ export const KACHEL_ZAHL = 'text-[clamp(1.375rem,1.9vw,1.75rem)]';
  * Vorher bis 34 px. Auf einem 13-Zoll-Bildschirm nimmt eine Zeile damit mehr
  * Platz ein als die erste Kachelreihe darunter.
  */
-export const SEITEN_TITEL = 'text-[clamp(1.375rem,2.4vw,1.75rem)]';
+export const SEITEN_TITEL = 'text-[clamp(1.5rem,2.2vw,2rem)]';
 
 /**
  * Höhe einer Kalenderzelle im Monatsraster.

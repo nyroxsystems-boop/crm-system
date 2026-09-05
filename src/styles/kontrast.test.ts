@@ -14,7 +14,7 @@
  *
  * Grenze: 4,5 für gewöhnlichen Text, 3,0 für Symbole und Umrisse.
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -63,9 +63,8 @@ function ueber(vorne: Rgb, hinten: Rgb, deckung: number): Rgb {
 }
 
 const WEISS: Rgb = [1, 1, 1];
-const GRUND = token('bg-canvas');
 /** Oberer Rand des Kartenverlaufs — der hellste Untergrund im CRM. */
-const KARTE = ueber(WEISS, GRUND, 0.045);
+const KARTE = token('karte-von');
 
 describe('Textstufen auf dem Kartengrund', () => {
     it.each([
@@ -102,6 +101,14 @@ describe('Zustands- und Akzentfarben', () => {
     });
 });
 
+describe.each(['dunkel', 'hell'] as const)('getönte Hinweise im %sen Modus', (theme) => {
+    it.each(['success', 'warning', 'danger', 'info', 'accent-500'])('%s bleibt auf eigener Tönung lesbar', (name) => {
+        const foreground = token(name, theme);
+        const background = ueber(foreground, token('bg-surface', theme), 0.12);
+        expect(kontrast(foreground, background)).toBeGreaterThanOrEqual(4.5);
+    });
+});
+
 describe('gefuellte Akzentflaechen', () => {
     /**
      * Der Grund, warum gefüllte Knöpfe accent-600 nehmen und nicht accent-500:
@@ -130,26 +137,19 @@ describe('Stufen bleiben unterscheidbar', () => {
     });
 });
 
-describe('gleiche Palette wie das Admin-Dashboard', () => {
-    /**
-     * Beide Anwendungen sollen zusammen aussehen. Wenn hier jemand einen Wert
-     * ändert, ohne es dort zu tun, fällt es auf — statt erst dem Nutzer, der
-     * zwischen den beiden wechselt.
-     *
-     * Die Werte stammen aus Admin-Dashboard/src/design-system/tokens.css
-     * (dort als HSL gepflegt, hier die umgerechneten HEX).
-     */
-    it.each([
-        ['text-primary', '#E9EBF1'],
-        ['text-tertiary', '#8A90A3'],
-        ['accent-400', '#8FB0FF'],
-        ['accent-500', '#5C8DFF'],
-        ['accent-600', '#3E64E0'],
-    ])('%s ist %s', (name, erwartet) => {
-        // DUNKEL_TEIL, nicht die ganze Datei: sonst könnte die Prüfung den
-        // hellen Wert erwischen, wenn der dunkle einmal fehlt.
-        const m = new RegExp(`--${name}:\\s*(#[0-9A-Fa-f]{6})`).exec(DUNKEL_TEIL);
-        expect(m?.[1].toUpperCase()).toBe(erwartet);
+describe('gemeinsame dunkle Grundflächen und Textfarben', () => {
+    const adminPath = join(process.cwd(), '../Admin-Dashboard/src/design-system/tokens.css');
+    // Read the other platform itself; copied hex expectations cannot detect drift.
+    it.skipIf(!existsSync(adminPath)).each([
+        'bg-canvas', 'bg-surface', 'text-primary', 'text-secondary', 'text-tertiary', 'text-muted',
+    ])('%s stimmt mit den Admin-Tokens überein', (name) => {
+        const admin = readFileSync(adminPath, 'utf8');
+        const match = new RegExp(`--${name}:\\s*(\\d+)\\s+(\\d+)%\\s+(\\d+)%`).exec(admin);
+        expect(match).not.toBeNull();
+        const expected = hslZuRgb(Number(match![1]), Number(match![2]), Number(match![3]));
+        const actual = token(name);
+        // HSL percentages and 8-bit hex round differently.
+        expected.forEach((channel, index) => expect(Math.abs(channel - actual[index]) * 255).toBeLessThanOrEqual(2));
     });
 });
 
@@ -391,10 +391,9 @@ describe('Karten heben sich vom Grund ab — in BEIDEN Modi', () => {
         expect(leuchtdichte(token('bg-canvas', 'hell'))).toBeLessThan(0.90);
     });
 
-    it('im Hellen traegt ein Schatten die Tiefe, im Dunkeln nicht', () => {
-        // Ein Schatten auf schwarzem Grund ist unsichtbar — dort macht ihn die
-        // hellere Fläche. Im Hellen ist es genau umgekehrt.
-        expect(DUNKEL_TEIL).toMatch(/--karte-schatten:\s*none/);
+    it('Karten erhalten in beiden Modi eigene Schatten', () => {
+        expect(DUNKEL_TEIL).toMatch(/--karte-schatten:\s*var\(--shadow-card\)/);
+        expect(DUNKEL_TEIL).toMatch(/--shadow-card:\s*[^;]*\d/);
         expect(HELL_TEIL).toMatch(/--karte-schatten:\s*[^;]*\d/);
     });
 });

@@ -3,12 +3,13 @@
  * Lean auf cmdk, dark-getokent.
  */
 import { Command } from 'cmdk';
+import { useRef } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import {
-  LayoutDashboard, Users, Workflow, Mail, BarChart3, Settings as SettingsIcon,
+  LayoutDashboard, Users, Workflow, BarChart3, Settings as SettingsIcon,
   UserCog, Layers, Plus, Upload, Search, Radar, Calendar,
 } from 'lucide-react';
 import type { ViewId } from './layout/Sidebar';
-import { motion, AnimatePresence } from 'motion/react';
 
 interface CommandPaletteProps {
   open: boolean;
@@ -37,30 +38,22 @@ const NAV: { view: ViewId; label: string; icon: typeof LayoutDashboard; kw?: str
 ];
 
 export function CommandPalette({ open, onClose, onNavigate, onNewLead, onImport }: CommandPaletteProps) {
+  const returnFocus = useRef<HTMLElement | null>(null);
   const go = (fn: () => void) => {
     fn();
     onClose();
   };
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          className="fixed inset-0 z-[60] flex items-start justify-center bg-black/70 p-4 pt-[12vh] backdrop-blur-sm"
-          onClick={onClose}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-        >
-          <motion.div
-            onClick={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, scale: 0.97, y: -8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.97, y: -8 }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="w-full max-w-xl overflow-hidden rounded-xl border border-border-subtle bg-surface shadow-modal"
-          >
+    <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/60 animate-in fade-in duration-150" />
+        <Dialog.Content
+          aria-describedby={undefined}
+          onOpenAutoFocus={() => { returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }}
+          onCloseAutoFocus={(event) => { event.preventDefault(); if (returnFocus.current?.isConnected) returnFocus.current.focus(); }}
+          className="fixed left-1/2 top-[12vh] z-[61] w-[calc(100%_-_2rem)] max-w-xl -translate-x-1/2 overflow-hidden rounded-2xl border border-border-subtle bg-surface shadow-modal animate-in fade-in duration-150">
+            <Dialog.Title className="sr-only">Schnellsuche und Aktionen</Dialog.Title>
             <Command
               label="Befehle"
               className="[&_[cmdk-group-heading]]:label-technical [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-text-muted"
@@ -68,7 +61,6 @@ export function CommandPalette({ open, onClose, onNavigate, onNewLead, onImport 
               <div className="flex items-center gap-2 border-b border-border-subtle px-3">
                 <Search className="size-4 shrink-0 text-text-muted" />
                 <Command.Input
-                  autoFocus
                   placeholder="Suchen oder Befehl eingeben…"
                   className="h-12 w-full bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none"
                 />
@@ -116,9 +108,8 @@ export function CommandPalette({ open, onClose, onNavigate, onNewLead, onImport 
                 </Command.Group>
               </Command.List>
             </Command>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

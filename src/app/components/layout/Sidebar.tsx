@@ -49,7 +49,18 @@ interface NavItem {
   view: ViewId;
   label: string;
   icon: LucideIcon;
+  tone: NavTone;
 }
+
+type NavTone = 'accent' | 'info' | 'success' | 'warning' | 'danger';
+
+const NAV_TONES: Record<NavTone, string> = {
+  accent: 'bg-accent-500/[0.10] text-accent-500',
+  info: 'bg-status-info/10 text-status-info',
+  success: 'bg-status-success/10 text-status-success',
+  warning: 'bg-status-warning/10 text-status-warning',
+  danger: 'bg-status-danger/10 text-status-danger',
+};
 
 interface NavSection {
   id: string;
@@ -62,22 +73,22 @@ export const NAV_SECTIONS: NavSection[] = [
     id: 'crm',
     label: 'CRM',
     items: [
-      { view: 'dashboard', label: 'Arbeitsübersicht', icon: LayoutDashboard },
-      { view: 'leads', label: 'Leads', icon: Users },
-      { view: 'pipeline', label: 'Pipeline', icon: Workflow },
-      { view: 'scraper', label: 'Lead-Quellen', icon: Radar },
-      { view: 'reports', label: 'Berichte', icon: BarChart3 },
-      { view: 'kalender', label: 'Kalender', icon: Calendar },
+      { view: 'dashboard', label: 'Arbeitsübersicht', icon: LayoutDashboard, tone: 'accent' },
+      { view: 'leads', label: 'Leads', icon: Users, tone: 'info' },
+      { view: 'pipeline', label: 'Pipeline', icon: Workflow, tone: 'success' },
+      { view: 'scraper', label: 'Lead-Quellen', icon: Radar, tone: 'warning' },
+      { view: 'reports', label: 'Berichte', icon: BarChart3, tone: 'accent' },
+      { view: 'kalender', label: 'Kalender', icon: Calendar, tone: 'warning' },
     ],
   },
   {
     id: 'admin',
     label: 'Organisation',
     items: [
-      { view: 'settings', label: 'Einstellungen', icon: SettingsIcon },
-      { view: 'security', label: 'Kontosicherheit', icon: UserCog },
-      { view: 'users', label: 'Vertriebsteam', icon: UserCog },
-      { view: 'pipelineSettings', label: 'Pipeline-Setup', icon: Layers },
+      { view: 'settings', label: 'Einstellungen', icon: SettingsIcon, tone: 'accent' },
+      { view: 'security', label: 'Kontosicherheit', icon: UserCog, tone: 'danger' },
+      { view: 'users', label: 'Vertriebsteam', icon: UserCog, tone: 'info' },
+      { view: 'pipelineSettings', label: 'Pipeline-Setup', icon: Layers, tone: 'success' },
     ],
   },
 ];
@@ -364,14 +375,14 @@ function Nav({
                         className="absolute inset-y-0 left-0 w-[2px] rounded-r-full bg-accent-500"
                       />
                     )}
-                    <Icon
-                      size={16}
+                    <span
                       className={cn(
-                        'shrink-0 transition-colors',
-                        isActive ? 'text-accent-500' : 'text-text-faint group-hover:text-text-tertiary',
+                        'flex size-7 shrink-0 items-center justify-center rounded-lg transition-[background-color,color,transform] group-hover:scale-105',
+                        isActive ? 'bg-accent-600 text-white shadow-sm' : NAV_TONES[item.tone],
                       )}
-                      aria-hidden
-                    />
+                    >
+                      <Icon size={15} aria-hidden />
+                    </span>
                     {!collapsed && <span className="flex-1 truncate text-left">{item.label}</span>}
                   </button>
                 </li>

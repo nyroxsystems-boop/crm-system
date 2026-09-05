@@ -59,8 +59,13 @@ const LEADS = Array.from({ length: 42 }, (_, i) => ({
 vi.mock('../app/utils/storage', () => ({
     getLeads: () => Promise.resolve(LEADS),
     getSettings: () => ({ pipelineStages: ['Neu', 'Kontaktiert', 'Qualifiziert', 'Gewonnen', 'Verloren'].map((name, index) => ({ id: String(index), name, isActive: true, order: index, category: name === 'Gewonnen' ? 'won' : name === 'Verloren' ? 'lost' : 'open' })) }),
-    getCurrentUser: () => ({ username: 'aaron', name: 'Aaron Vogt', role: 'Admin' }),
-    getAppointments: () => Promise.resolve([]),
+    getCurrentUser: () => ({ id: 'sales-1', username: 'aaron', name: 'Aaron Vogt', role: 'Vertrieb' }),
+    getAppointments: () => Promise.resolve([
+        { id: 'a1', assignee_id: 'sales-1', assignee_name: 'Aaron', customer_name: 'Autoteile Nord GmbH',
+          title: 'Erstgespräch', start_at: new Date().toISOString(), duration_minutes: 30, status: 'confirmed' },
+        { id: 'a2', assignee_id: 'sales-1', assignee_name: 'Aaron', customer_name: 'Werkstatt Süd',
+          title: 'Angebot besprechen', start_at: new Date(Date.now() + 36e5).toISOString(), duration_minutes: 45, status: 'confirmed' },
+    ]),
     // Form wie die echte Funktion: AppointmentAdmin[] mit `username`, nicht
     // bloss Strings. Mit Strings war `x.username` undefined und das Dashboard
     // stürzte ab — der Absturz war echt, nur ausgelöst durch eine falsche
@@ -123,15 +128,11 @@ function seite(titel: string, css: string, markup: string, zusatz = ''): string 
 <html lang="de" data-theme="dark">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${titel}</title>
 <style>${css}</style>
 <style>
   /* Nur Sichtbarkeit erzwingen — alles andere kommt aus der ausgelieferten CSS. */
-  .hidden.md\\:block { display: block !important; }
-  .hidden.sm\\:inline { display: inline !important; }
-  .hidden.md\\:inline { display: inline !important; }
-  .hidden.lg\\:inline { display: inline !important; }
-  .hidden.md\\:inline-flex { display: inline-flex !important; }
   ${zusatz}
 </style>
 </head>
@@ -198,15 +199,22 @@ describe('Bildprobe CRM-Redesign', () => {
      * `waitFor` wartet, bis die Zahlen da sind.
      */
     it.skipIf(!css)('schreibt das Dashboard nach dist-probe/', async () => {
-        const { container } = render(<Dashboard />);
+        const { container } = render(
+            <div className="flex h-screen h-dvh w-full overflow-hidden bg-canvas text-text-primary" data-workspace="crm">
+                <Sidebar activeView="dashboard" onNavigate={() => {}} mobileOpen={false} onMobileOpenChange={() => {}} />
+                <div className="flex min-w-0 flex-1 flex-col">
+                    <Topbar title="Arbeitsübersicht" user={NUTZER} onOpenMobileSidebar={() => {}} onOpenPalette={() => {}} onRefresh={() => {}} onNewLead={() => {}} onLogout={() => {}} />
+                    <main className="flex-1 overflow-auto"><Dashboard /></main>
+                </div>
+            </div>,
+        );
         await waitFor(() => {
             expect(container.querySelector('h1')?.textContent ?? '').toBe('Arbeitsübersicht');
-            expect(container.textContent).toContain('Nächste Schritte');
+            expect(container.textContent).toContain('Autoteile 7 GmbH');
+            expect(container.textContent).not.toContain('Arbeitsliste wird geladen');
         });
 
-        const markup =
-            `<div class="flex min-h-screen bg-canvas text-text-primary">` +
-            `<div class="min-w-0 flex-1">${container.innerHTML}</div></div>`;
+        const markup = container.innerHTML;
 
         mkdirSync(AUSGABE, { recursive: true });
         beiwerkKopieren();
