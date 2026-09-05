@@ -13,9 +13,14 @@ import {
   useEffect,
   useRef,
   useState,
+  useId,
+  Children,
+  isValidElement,
+  cloneElement,
   type ButtonHTMLAttributes,
   type HTMLAttributes,
   type ReactNode,
+  type ReactElement,
 } from 'react';
 import { X, Check, ChevronDown, ArrowLeft } from 'lucide-react';
 import { cn } from './ui/utils';
@@ -672,7 +677,7 @@ export function SectionLabel({ className, children }: { className?: string; chil
   return (
     <span
       className={cn(
-        'font-mono text-[10px] font-bold uppercase leading-none tracking-[0.2em] text-text-muted',
+        'text-sm font-medium leading-normal text-text-secondary',
         className,
       )}
     >
@@ -775,13 +780,13 @@ export function StatCard({
     <Card className={cn('flex h-full flex-col', KACHEL, className)}>
       <div className="flex flex-1 items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <SectionLabel className="block truncate !tracking-[0.16em]">{label}</SectionLabel>
+          <SectionLabel className="block truncate">{label}</SectionLabel>
           <div className="mt-1 truncate text-[11px] font-medium leading-[1.35] text-text-muted">
             {hint ?? '\u00A0'}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2.5">
-          <span className={cn('font-mono font-bold leading-none tracking-[-0.03em] tabular-nums text-text-primary', KACHEL_ZAHL)}>
+          <span className={cn('font-display font-semibold leading-none tabular-nums text-text-primary', KACHEL_ZAHL)}>
             {value}
           </span>
           {icon && <span className="shrink-0 text-text-tertiary">{icon}</span>}
@@ -813,7 +818,7 @@ export function EmptyState({
     // aus, eine gestrichelte nach "hier kommt noch etwas".
     <div
       className={cn(
-        'flex flex-col items-center justify-center gap-3 rounded-[18px] border border-dashed border-overlay/10 bg-overlay/[0.014] px-6 py-13 text-center',
+        'flex flex-col items-center justify-center gap-3 rounded-lg px-6 py-10 text-center',
         className,
       )}
     >
@@ -837,7 +842,7 @@ export function EmptyState({
 export const inputClass =
   // 10 px Radius und durchscheinende Fläche wie die Felder im Entwurf
   // (rgba(255,255,255,.04) über 1 px rgba(255,255,255,.07)).
-  'w-full rounded-[10px] border border-overlay/[0.07] bg-overlay/[0.04] px-3 text-sm text-text-primary ' +
+  'w-full rounded-md border border-border-strong bg-surface px-3 text-sm text-text-primary ' +
   'placeholder:text-text-muted transition-colors focus:border-accent-500 focus:outline-none';
 
 export const inputSized = cn(inputClass, 'h-9');
@@ -857,14 +862,18 @@ export function Field({
   className?: string;
   children: ReactNode;
 }) {
+  const generatedId = useId();
+  const childrenArray = Children.toArray(children);
+  const control = childrenArray.find((child) => isValidElement(child) && (['input', 'textarea', 'select'].includes(String(child.type)) || (typeof child.type === 'function' && child.type.name === 'CustomSelect'))) as ReactElement<{ id?: string; 'aria-describedby'?: string; 'aria-required'?: boolean }> | undefined;
+  const controlId = htmlFor || control?.props.id || generatedId;
   return (
     <div className={cn('space-y-1.5', className)}>
-      <label htmlFor={htmlFor} className="block text-sm font-medium text-text-secondary">
+      <label htmlFor={controlId} className="block text-sm font-medium text-text-secondary">
         {label}
-        {required && <span className="ml-0.5 text-status-danger">*</span>}
+        {required && <span aria-hidden="true" className="ml-0.5 text-status-danger">*</span>}
       </label>
-      {children}
-      {hint && <p className="text-xs text-text-muted">{hint}</p>}
+      {childrenArray.map((child) => child === control ? cloneElement(control, { id: controlId, 'aria-required': required || undefined, 'aria-describedby': hint ? `${controlId}-hint` : control.props['aria-describedby'] }) : child)}
+      {hint && <p id={`${controlId}-hint`} className="text-xs text-text-muted">{hint}</p>}
     </div>
   );
 }
@@ -897,20 +906,29 @@ export function Modal({
   children: ReactNode;
   bodyClassName?: string;
 }) {
-  // Body-Scroll-Lock + Esc schließt.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  const headingId = useId();
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
+  // Keep focus inside the dialog while its body scrolls independently.
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
+    const previousFocus = document.activeElement as HTMLElement | null;
     document.body.style.overflow = 'hidden';
+    const focusable = () => Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex="0"]') || []).filter((element) => !element.closest('[hidden]'));
+    (dialogRef.current?.querySelector<HTMLElement>('input, textarea, select') || focusable()[0])?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') { e.stopPropagation(); closeRef.current(); }
+      if (e.key === 'Tab') { const controls = focusable(); const first = controls[0]; const last = controls[controls.length - 1]; if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); } }
     };
     window.addEventListener('keydown', onKey);
     return () => {
       document.body.style.overflow = prev;
       window.removeEventListener('keydown', onKey);
+      previousFocus?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -923,20 +941,22 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/50 p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
+      aria-labelledby={title ? headingId : undefined}
     >
       <div
         className={cn(
-          'animate-scale-in my-8 flex w-full flex-col rounded-lg border border-border-subtle bg-surface shadow-modal',
+          'flex max-h-[calc(100dvh-32px)] w-full flex-col overflow-hidden rounded-lg border border-border-subtle bg-surface shadow-modal',
           maxW,
         )}
+        ref={dialogRef}
         onClick={(e) => e.stopPropagation()}
       >
         {(title || subtitle || headerAccessory || onBack) && (
-          <div className="flex items-start justify-between gap-4 border-b border-border-subtle px-5 py-4">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border-subtle px-5 py-4">
             <div className="flex min-w-0 items-center gap-3">
               {onBack && (
                 <button
@@ -950,7 +970,7 @@ export function Modal({
               )}
               <div className="min-w-0">
                 {title && (
-                  <h2 className="font-display text-lg font-semibold tracking-tight text-text-primary">
+                  <h2 id={headingId} className="font-display text-lg font-semibold tracking-tight text-text-primary">
                     {title}
                   </h2>
                 )}
@@ -965,9 +985,9 @@ export function Modal({
             </div>
           </div>
         )}
-        <div className={cn('px-5 py-5', bodyClassName)}>{children}</div>
+        <div className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5', bodyClassName)}>{children}</div>
         {footer && (
-          <div className="flex flex-col-reverse gap-2 border-t border-border-subtle px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border-subtle px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
             {footer}
           </div>
         )}

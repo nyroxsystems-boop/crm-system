@@ -19,10 +19,10 @@ interface CommandPaletteProps {
 }
 
 const NAV: { view: ViewId; label: string; icon: typeof LayoutDashboard; kw?: string }[] = [
-  { view: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, kw: 'übersicht home start' },
+  { view: 'dashboard', label: 'Arbeitsübersicht', icon: LayoutDashboard, kw: 'übersicht home start' },
   { view: 'leads', label: 'Leads', icon: Users, kw: 'kontakte firmen' },
   { view: 'pipeline', label: 'Pipeline', icon: Workflow, kw: 'kanban stages board' },
-  { view: 'scraper', label: 'Lead-Scraper', icon: Radar, kw: 'scraper osm umkreis autoteilehändler leads finden' },
+  { view: 'scraper', label: 'Lead-Quellen', icon: Radar, kw: 'scraper osm umkreis autoteilehändler leads finden' },
   { view: 'reports', label: 'Berichte', icon: BarChart3, kw: 'analytics statistik funnel' },
   /* Der Kalender FEHLTE hier, obwohl er in der Seitenleiste steht und
      eine eigene Ansicht ist. Wer ihn über das Suchfeld erreichen wollte,
@@ -30,8 +30,9 @@ const NAV: { view: ViewId; label: string; icon: typeof LayoutDashboard; kw?: str
      Eine Suche, die eine vorhandene Seite verschweigt, ist schlimmer als
      keine: sie beantwortet die Frage falsch statt gar nicht. */
   { view: 'kalender', label: 'Kalender', icon: Calendar, kw: 'termine kalender follow-up wiedervorlage' },
+  { view: 'security', label: 'Kontosicherheit', icon: UserCog, kw: 'passwort mfa authenticator sicherheit' },
   { view: 'settings', label: 'Einstellungen', icon: SettingsIcon },
-  { view: 'users', label: 'Benutzerverwaltung', icon: UserCog, kw: 'team' },
+  { view: 'users', label: 'Vertriebsteam', icon: UserCog, kw: 'team' },
   { view: 'pipelineSettings', label: 'Pipeline-Setup', icon: Layers, kw: 'stages' },
 ];
 

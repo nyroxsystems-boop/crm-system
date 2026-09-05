@@ -28,7 +28,7 @@
         var gespeichert = localStorage.getItem('crm_theme');
         document.documentElement.setAttribute(
             'data-theme',
-            gespeichert === 'light' ? 'light' : 'dark'
+            gespeichert === 'dark' ? 'dark' : 'light'
         );
     } catch (e) {
         /* Privater Modus: Es bleibt bei der Vorgabe aus dem Attribut in index.html. */

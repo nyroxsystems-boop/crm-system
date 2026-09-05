@@ -58,9 +58,9 @@ describe('Einstellungen speichern', () => {
         expect(e.grund).toMatch(/nicht erreichbar/);
     });
 
-    it('schreibt trotzdem lokal, damit die Eingabe nicht wegspringt', async () => {
+    it('übernimmt abgelehnte Einstellungen nicht in den gültigen Stand', async () => {
         await speichernMit({ ok: false, status: 403 });
-        expect(localStorage.getItem('haendler_crm_settings')).not.toBeNull();
+        expect(localStorage.getItem('haendler_crm_settings')).toBeNull();
     });
 });
 
@@ -90,6 +90,6 @@ describe('Keine Stelle meldet am Ergebnis vorbei', () => {
         expect(quelle).toMatch(/toast\.error/);
         // Die Fehlermeldung MUSS sagen, dass die Aenderung verlorengeht —
         // sonst haelt man es fuer eine Kleinigkeit und merkt es zu spaet.
-        expect(quelle).toMatch(/verloren/);
+        expect(quelle).toMatch(/bisher gespeicherte Stand bleibt gültig/);
     });
 });

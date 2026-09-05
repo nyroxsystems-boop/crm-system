@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Lock, User } from 'lucide-react';
-import { authenticate } from '../utils/storage';
+import { authenticate, AuthenticationChallenge } from '../utils/storage';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 
@@ -14,13 +14,16 @@ import { Label } from './ui/label';
 
 interface LoginProps {
     onLogin: () => void;
+    onReset?: () => void;
 }
 
-export function Login({ onLogin }: LoginProps) {
+export function Login({ onLogin, onReset }: LoginProps) {
     const [identifier, setIdentifier] = useState('');
     const [password, setPassword] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [mfaRequired, setMfaRequired] = useState(false);
+    const [totpCode, setTotpCode] = useState('');
 
     const trimmed = identifier.trim();
     const canSubmit = trimmed.length >= 3 && password.length > 0 && !busy;
@@ -32,14 +35,15 @@ export function Login({ onLogin }: LoginProps) {
         setError(null);
 
         try {
-            const user = await authenticate(trimmed, password);
+            const user = await authenticate(trimmed, password, mfaRequired ? totpCode.trim() : undefined);
             if (user) {
                 onLogin();
             } else {
                 setError('Ungültige Anmeldedaten. Bitte versuchen Sie es erneut.');
             }
-        } catch {
-            setError('Anmeldung fehlgeschlagen. Bitte später erneut versuchen.');
+        } catch (e) {
+            if (e instanceof AuthenticationChallenge) { setMfaRequired(true); setError(e.message); }
+            else setError('Anmeldung fehlgeschlagen. Bitte später erneut versuchen.');
         } finally {
             setBusy(false);
         }
@@ -92,7 +96,7 @@ export function Login({ onLogin }: LoginProps) {
                                 value={identifier}
                                 onChange={(e) => setIdentifier(e.target.value)}
                                 className="pl-9 focus-visible:ring-2"
-                                placeholder="admin oder admin@partsunion.de"
+                                placeholder="name@partsunion.de"
                                 autoCapitalize="off"
                                 autoCorrect="off"
                                 spellCheck={false}
@@ -136,6 +140,7 @@ export function Login({ onLogin }: LoginProps) {
                         </div>
                     </div>
 
+                    {mfaRequired && <div className="space-y-2"><Label htmlFor="login-mfa">Sicherheitscode</Label><Input id="login-mfa" autoComplete="one-time-code" value={totpCode} onChange={(e) => setTotpCode(e.target.value)} placeholder="Authenticator- oder Wiederherstellungscode" required autoFocus /></div>}
                     {error && (
                         <div role="alert" className="text-sm" style={{ color: 'var(--danger)' }}>
                             {error}
@@ -157,16 +162,8 @@ export function Login({ onLogin }: LoginProps) {
                         {busy ? 'Anmelden…' : 'Anmelden'}
                     </button>
                 </form>
+                <button type="button" onClick={onReset} className="mt-5 text-sm font-medium text-accent-500 hover:underline">Passwort vergessen?</button>
 
-                {/*
-                  Kein „Passwort vergessen?"-Link: Dieses interne Operator-CRM ist ein
-                  reines SPA ohne Router — /reset-password war ein toter Pfad (lädt nur
-                  wieder das SPA) und es gibt hier keine Reset-Abschluss-Maske. Ein Link,
-                  der ins Leere führt, ist schlechtere UX als keiner. Admin-Passwörter
-                  werden out-of-band zurückgesetzt (Backend /api/admin-auth/request-reset
-                  + reset-password ohne FE hier). Erst wieder anzeigen, wenn der komplette
-                  Reset-Flow (E-Mail anfordern → Token → neues Passwort) gebaut ist.
-                */}
             </div>
         </main>
     );

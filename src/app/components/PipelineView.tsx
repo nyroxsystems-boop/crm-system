@@ -1,20 +1,29 @@
 import { useState, useEffect } from 'react';
 import { getLeads, saveLead, deleteLead, getSettings, type Lead, type PipelineStage } from '../utils/storage';
+import { LoadError } from './LoadError';
+import { stageCategory, stageAgeDays } from '../utils/stages';
 import { LeadDetailModal } from './LeadDetailModal';
 import { LeadModal } from './LeadModal';
 import { Plus, Check, Phone, Mail, Inbox } from 'lucide-react';
 import { Badge, Card, EmptyState, IconButton, PageHeader, PriorityPill, SEITEN_RAND, cn, inputClass, statusColor } from './ui-kit';
 import { LEER_INNEN } from './dichte';
+import { toast } from 'sonner';
+import { localDayKey } from '../utils/leadQuality';
 
 const EUR = (n: number) => '€' + (n || 0).toLocaleString('de-DE');
 
 export function PipelineView() {
+  const [loadError, setLoadError] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [selectedStage, setSelectedStage] = useState<string>('');
   const [detailLead, setDetailLead] = useState<Lead | null>(null);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [mode, setMode] = useState<'board' | 'list'>('board');
+  const [assignee, setAssignee] = useState('all');
+  const [moving, setMoving] = useState<string | null>(null);
   // Stammdaten-Maske aus dem Aktivitäten-Overlay geöffnet? → Zurück-Pfeil.
   const [editFromDetail, setEditFromDetail] = useState(false);
 
@@ -23,6 +32,7 @@ export function PipelineView() {
   }, []);
 
   const loadData = async () => {
+    setLoadError(false); setLoading(true);
     try {
       const allLeads = await getLeads();
       const activeStages = getSettings().pipelineStages.filter((s) => s.isActive).sort((a, b) => a.order - b.order);
@@ -30,8 +40,8 @@ export function PipelineView() {
       setStages(activeStages);
     } catch (error) {
       console.error('Failed to load pipeline data:', error);
-      setLeads([]);
-    }
+      setLoadError(true);
+    } finally { setLoading(false); }
   };
 
   // Standard-Auswahl: erste Pipeline-Stufe, sobald die Stages geladen sind.
@@ -51,32 +61,54 @@ export function PipelineView() {
     try {
       await saveLead({ company: c, status, source: 'Manuell' });
       await loadData();
-    } catch {
-      /* optimistic */
-    }
+    } catch { setLeads((prev) => prev.filter((lead) => lead.id !== optimistic.id)); toast.error('Lead konnte nicht angelegt werden.'); }
   };
 
   const handleDeleteLead = async (id: string) => {
     if (confirm('Möchten Sie diesen Lead wirklich löschen?')) {
-      setLeads((prev) => prev.filter((l) => l.id !== id));
-      await deleteLead(id);
+      try { await deleteLead(id); setLeads((prev) => prev.filter((l) => l.id !== id)); }
+      catch { toast.error('Lead konnte nicht gelöscht werden.'); }
     }
   };
 
-  const handleSaveLead = (lead: Partial<Lead>) => {
-    saveLead(lead);
-    loadData();
-    setIsModalOpen(false);
-    setEditingLead(null);
-    setEditFromDetail(false);
+  const handleSaveLead = async (lead: Partial<Lead>) => {
+    await saveLead(lead);
+    await loadData();
+    setIsModalOpen(false); setEditingLead(null); setEditFromDetail(false);
   };
 
-  const selectedLeads = leads.filter((l) => l.status === selectedStage);
+  async function moveLead(id: string, status: string) {
+    const lead = leads.find((item) => item.id === id);
+    if (!lead || lead.status === status || moving) return;
+    setMoving(id);
+    try { await saveLead({ id, status }); setLeads((rows) => rows.map((item) => item.id === id ? { ...item, status, stageId: stages.find((stage) => stage.name === status)?.id, stageCategory: stageCategory(stages.find((stage) => stage.name === status)), stageEnteredAt: new Date().toISOString() } : item)); toast.success(`In „${status}“ verschoben.`); }
+    catch { toast.error('Die Phase wurde nicht geändert. Bitte erneut versuchen.'); }
+    finally { setMoving(null); }
+  }
+  const visibleLeads = leads.filter((lead) => assignee === 'all' || (assignee === 'unassigned' ? !lead.assignedTo : lead.assignedTo === assignee));
+
+  const selectedLeads = visibleLeads.filter((l) => l.status === selectedStage);
   const selectedSum = selectedLeads.reduce((s, l) => s + (l.value || 0), 0);
 
   return (
     <div className={cn(SEITEN_RAND, 'space-y-5')}>
-      <PageHeader title="Pipeline" subtitle="Pipeline-Stufe oben wählen — darunter erscheinen die zugehörigen Leads." />
+      <PageHeader title="Pipeline" subtitle="Verkaufschancen nach Phase und Zuständigkeit. Änderungen werden erst nach dem Speichern übernommen." actions={<div className="flex flex-wrap items-center gap-2"><select aria-label="Pipeline nach Zuständigkeit filtern" className={`${inputClass} w-auto`} value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="all">Gesamtes Team</option><option value="unassigned">Nicht zugewiesen</option>{[...new Set(leads.map((lead) => lead.assignedTo).filter(Boolean))].sort().map((name) => <option key={name} value={name}>{name}</option>)}</select><div className="flex rounded-md border border-border-subtle bg-surface p-1">{(['board', 'list'] as const).map((view) => <button key={view} aria-pressed={mode === view} onClick={() => setMode(view)} className={`rounded px-3 py-1 text-sm ${mode === view ? 'bg-elevated font-medium' : 'text-text-muted'}`}>{view === 'board' ? 'Board' : 'Liste'}</button>)}</div></div>} />
+
+      {loadError && <LoadError message="Pipeline konnte nicht geladen werden." onRetry={() => void loadData()} />}
+      {loading && <p role="status" className="text-sm text-text-muted">Pipeline wird geladen…</p>}
+      {mode === 'board' && <div className="flex gap-4 overflow-x-auto pb-4" aria-label="Vertriebspipeline">
+        {stages.map((stage) => {
+          const rows = visibleLeads.filter((lead) => lead.status === stage.name);
+          return <section key={stage.id} className="w-72 shrink-0 rounded-lg border border-border-subtle bg-elevated/50" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void moveLead(e.dataTransfer.getData('text/plain'), stage.name); }} aria-label={stage.name}>
+            <div className="border-b border-border-subtle px-4 py-3"><div className="flex items-center justify-between"><h2 className="font-medium">{stage.name}</h2><span className="text-sm tabular-nums text-text-muted">{rows.length}</span></div><p className="mt-1 text-sm text-text-muted">{EUR(rows.reduce((total, lead) => total + (lead.value || 0), 0))} · {stage.probability}% Planannahme</p></div>
+            <div className="space-y-3 p-3">{rows.map((lead) => <article key={lead.id} draggable={!moving} onDragStart={(e) => e.dataTransfer.setData('text/plain', lead.id)} className="rounded-md border border-border-subtle bg-surface p-3">
+              <button onClick={() => setDetailLead(lead)} className="w-full text-left"><span className="block text-sm font-medium">{lead.company}</span><span className="mt-1 block text-xs text-text-muted">{lead.contactPerson || 'Ansprechpartner fehlt'}</span></button><div className="mt-3 flex justify-between text-xs text-text-secondary"><span>{lead.assignedTo || 'Nicht zugewiesen'}</span><span>{EUR(lead.value || 0)}</span></div><p className={`mt-2 text-xs ${lead.nextFollowUpDate && lead.nextFollowUpDate.slice(0, 10) <= localDayKey(new Date()) ? 'text-status-warning' : 'text-text-muted'}`}>{lead.nextFollowUpDate ? `Wiedervorlage ${new Date(lead.nextFollowUpDate).toLocaleDateString('de-DE')}` : 'Nächsten Schritt planen'}</p>
+              <p className="mt-2 text-sm text-text-muted">{stageAgeDays(lead) === null ? 'Eintrittsdatum nicht erfasst' : `${stageAgeDays(lead)} Tage in dieser Phase`}</p>
+              <select aria-label={`Phase für ${lead.company}`} className={`${inputClass} mt-3 text-xs`} value={lead.status} disabled={moving === lead.id} onChange={(e) => void moveLead(lead.id, e.target.value)}>{stages.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}</select>
+            </article>)}{!loading && !loadError && !rows.length && <p className="px-2 py-5 text-center text-sm text-text-muted">Keine Leads</p>}<QuickAdd onAdd={(company) => quickAdd(company, stage.name)} /></div>
+          </section>;
+        })}
+      </div>}
 
       {/* Pipeline-Stufen als Karten (klickbar)
        *
@@ -92,9 +124,9 @@ export function PipelineView() {
        * vielen Karten, wie hineinpassen, und verteilt den Rest gleichmässig —
        * bei sechs Stufen genauso wie bei zwölf.
        */}
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-3">
+      {mode === 'list' && <div className="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-3">
         {stages.map((stage) => {
-          const stageLeads = leads.filter((l) => l.status === stage.name);
+          const stageLeads = visibleLeads.filter((l) => l.status === stage.name);
           const sum = stageLeads.reduce((s, l) => s + (l.value || 0), 0);
           const color = statusColor(stage.name);
           const active = selectedStage === stage.name;
@@ -126,10 +158,10 @@ export function PipelineView() {
             Keine aktiven Pipeline-Stufen. Lege welche unter „Pipeline-Setup" an.
           </Card>
         )}
-      </div>
+      </div>}
 
       {/* Leads der gewählten Stufe */}
-      {selectedStage && (
+      {mode === 'list' && selectedStage && (
         <Card className="overflow-visible">
           <div className="flex flex-wrap items-center gap-3 border-b border-border-subtle px-4 py-3">
             <span className="size-2.5 rounded-full" style={{ backgroundColor: statusColor(selectedStage) }} aria-hidden />

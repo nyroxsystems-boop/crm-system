@@ -6,6 +6,10 @@
  * Bestätigungs-Link) → bestätigt selbst → Status springt auf „Bestätigt".
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useAppointmentConflicts } from '../utils/useAppointmentConflicts';
+import { CalendarTimeGrid } from './CalendarTimeGrid';
+import { AppointmentConflictReview } from './AppointmentConflictReview';
+import { LoadError } from './LoadError';
 import { toast } from 'sonner';
 import { KALENDER_ZELLE } from './dichte';
 import {
@@ -15,10 +19,12 @@ import {
 import {
   getAppointments, getAppointmentAdmins, createAppointment, updateAppointment, cancelAppointment, deleteAppointment,
   getCurrentUser, type Appointment, type AppointmentAdmin, type AppointmentInput, type AppointmentStatus,
+  getTeams, type CrmTeam,
 } from '../utils/storage';
 import {
   PageHeader, Card, Button, IconButton, Field, Modal, inputSized, EmptyState, cn, SEITEN_RAND,
 } from './ui-kit';
+import { calendarDays, localAppointmentDay, localAppointmentTime, overlappingAppointments, type CalendarMode } from '../utils/calendar';
 
 const TYPE_META: Record<string, { label: string; chip: string }> = {
   quali: { label: 'Quali', chip: 'bg-violet-500/15 text-violet-300 hell:text-violet-700 border-violet-500/30' },
@@ -40,8 +46,8 @@ const WD = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const toKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const timeOf = (iso: string) => { const m = iso.match(/T(\d{2}):(\d{2})/); return m ? `${m[1]}:${m[2]}` : ''; };
-const dayKeyOf = (iso: string) => iso.slice(0, 10);
+const timeOf = localAppointmentTime;
+const dayKeyOf = localAppointmentDay;
 
 function buildGrid(cursor: Date): Date[] {
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
@@ -67,8 +73,13 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
   const [form, setForm] = useState<FormState>(emptyForm());
   const [saving, setSaving] = useState(false);
   const [detail, setDetail] = useState<Appointment | null>(null);
+  const [mode, setMode] = useState<CalendarMode>('week');
+  const [teams, setTeams] = useState<CrmTeam[]>([]);
+  const [teamFilter, setTeamFilter] = useState('all');
+  const review = useAppointmentConflicts(createOpen, `${form.date || ''}T${form.time || ''}`, form.durationMinutes || 30, form.assigneeId, editingId || undefined);
+  const [loadError, setLoadError] = useState(false);
 
-  const grid = useMemo(() => buildGrid(cursor), [cursor]);
+  const grid = useMemo(() => calendarDays(cursor, mode), [cursor, mode]);
   const todayKey = toKey(new Date());
   const myAdminId = useMemo(
     () => admins.find((a) => a.username?.toLowerCase() === currentUser?.username?.toLowerCase())?.id || null,
@@ -76,7 +87,7 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
   );
 
   const load = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setLoadError(false);
     try {
       const from = `${toKey(grid[0])}T00:00`;
       const to = `${toKey(grid[grid.length - 1])}T23:59`;
@@ -85,21 +96,22 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
       else if (assigneeFilter !== 'all' && assigneeFilter !== 'mine') params.assigneeId = assigneeFilter;
       setAppointments(await getAppointments(params));
     } catch {
-      toast.error('Termine konnten nicht geladen werden.');
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
   }, [grid, assigneeFilter, myAdminId]);
 
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { getAppointmentAdmins().then(setAdmins).catch(() => undefined); }, []);
+  useEffect(() => { getAppointmentAdmins().then(setAdmins).catch(() => undefined); getTeams().then(setTeams).catch(() => undefined); }, []);
 
   const byDay = useMemo(() => {
     const map: Record<string, Appointment[]> = {};
-    for (const a of appointments) (map[dayKeyOf(a.start_at)] ||= []).push(a);
+    const team = teams.find((item) => item.id === teamFilter);
+    for (const a of appointments.filter((item) => !team || (item.assignee_id && team.memberIds.includes(item.assignee_id)))) (map[dayKeyOf(a.start_at)] ||= []).push(a);
     Object.values(map).forEach((l) => l.sort((x, y) => x.start_at.localeCompare(y.start_at)));
     return map;
-  }, [appointments]);
+  }, [appointments, teams, teamFilter]);
   const selectedList = byDay[selectedDay] || [];
   const selDate = new Date(`${selectedDay}T00:00`);
 
@@ -122,6 +134,8 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
 
   async function submitForm() {
     if (!form.date || !form.time) { toast.error('Bitte Datum und Uhrzeit angeben.'); return; }
+    if (review.loading || review.error) { toast.error('Die Verfügbarkeit konnte noch nicht geprüft werden. Bitte erneut versuchen.'); return; }
+    if (review.conflicts.length && !review.confirmed) { toast.error('Bitte die Terminüberschneidung prüfen und bestätigen.'); return; }
     const payload: AppointmentInput = {
       type: form.type, title: form.title?.trim() || undefined, notes: form.notes, assigneeId: form.assigneeId,
       customerName: form.customerName, customerEmail: form.customerEmail, customerPhone: form.customerPhone,
@@ -130,18 +144,16 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
     };
     setSaving(true);
     try {
+      if (!(await review.verify())) { toast.error('Die Verfügbarkeit hat sich geändert. Bitte den Konflikt prüfen.'); return; }
       if (editingId) {
         const res = await updateAppointment(editingId, { ...payload, resendInvite: form.sendInvite });
-        if (res.calendarError) toast.warning(`Termin gespeichert, Teams-Synchronisierung ausstehend: ${res.calendarError}`);
-        else toast.success(res.inviteSent ? 'Termin aktualisiert · Teams und Einladung aktualisiert.' : 'Termin aktualisiert.');
-        if (res.calendarDecision && !res.calendarDecision.eligible) toast.info('Kein Teams-Termin: In den internen Notizen wurde kein eindeutiger digitaler Kundentermin erkannt.');
+        if (form.sendInvite && form.customerEmail && !res.inviteSent) toast.warning(`Termin aktualisiert. Einladung nicht versendet: ${res.inviteError || 'Bitte erneut versuchen.'}`);
+        else toast.success(res.inviteSent ? 'Termin und Einladung aktualisiert.' : 'Termin aktualisiert.');
       } else {
         const res = await createAppointment(payload);
-        if (res.calendarError) toast.warning(`Termin angelegt, Teams-Synchronisierung ausstehend: ${res.calendarError}`);
-        else if (res.inviteSent) toast.success(res.calendarSynced ? 'Termin und Teams-Call angelegt · Einladung verschickt.' : 'Termin angelegt · Einladung an den Kunden verschickt.');
+        if (res.inviteSent) toast.success('Termin angelegt · Einladung an den Kunden verschickt.');
         else if (form.sendInvite && form.customerEmail) toast.warning(`Termin angelegt, E-Mail nicht versendet: ${res.inviteError || 'unbekannt'}`);
         else toast.success('Termin angelegt.');
-        if (res.calendarDecision && !res.calendarDecision.eligible) toast.info('Bewusst ohne Teams angelegt: kein eindeutiger digitaler Kundentermin erkannt.');
       }
       setCreateOpen(false);
       setSelectedDay(form.date!);
@@ -175,14 +187,21 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
     if (!a.public_token) return;
     navigator.clipboard?.writeText(`https://partsunion.de/termin?t=${a.public_token}`).then(() => toast.success('Bestätigungs-Link kopiert.')).catch(() => undefined);
   }
+  const moveCursor = (direction: number) => {
+    const next = new Date(cursor);
+    if (mode === 'month') { next.setDate(1); next.setMonth(next.getMonth() + direction); }
+    else next.setDate(next.getDate() + direction * (mode === 'day' ? 1 : mode === 'agenda' ? 14 : 7));
+    setCursor(next); setSelectedDay(toKey(next));
+  };
 
   return (
     <div className={cn(SEITEN_RAND, 'space-y-5')}>
       <PageHeader
         title="Kalender"
-        subtitle="Quali- & Sales-Termine planen, einladen und nachhalten."
+        subtitle="Termine und Rückrufe koordinieren · Alle Uhrzeiten Europe/Berlin"
         actions={
           <div className="flex items-center gap-2">
+            <select aria-label="Teamkalender" value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className={cn(inputSized, 'w-[160px]')}><option value="all">Alle Teams</option>{teams.filter((team) => team.active).map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select>
             <select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} className={cn(inputSized, 'w-[180px]')}>
               <option value="all">Alle Zuständigen</option>
               {myAdminId && <option value="mine">Meine Termine</option>}
@@ -193,19 +212,21 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
         }
       />
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_360px]">
+      {loadError && <LoadError message="Termine konnten nicht geladen werden." onRetry={() => void load()} />}
+      <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex rounded-md border border-border-subtle bg-surface p-1">{([{ id: 'day', label: 'Tag' }, { id: 'week', label: 'Woche' }, { id: 'month', label: 'Monat' }, { id: 'agenda', label: 'Agenda' }] as const).map((item) => <button key={item.id} aria-pressed={mode === item.id} onClick={() => setMode(item.id)} className={`rounded px-4 py-1.5 text-sm ${mode === item.id ? 'bg-elevated font-medium' : 'text-text-secondary'}`}>{item.label}</button>)}</div><p className="text-sm text-text-muted">Meeting-Links können hinterlegt werden. Microsoft-365-Synchronisierung ist nicht eingerichtet.</p></div>
+      <div className={cn("grid grid-cols-1 gap-5", mode === "month" && "xl:grid-cols-[minmax(0,1fr)_340px]")}>
         {/* Gitter */}
-        <Card className="overflow-hidden">
+        <Card className="overflow-auto">
           <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3">
             <div className="text-lg font-semibold text-text-primary">{MONTHS[cursor.getMonth()]} {cursor.getFullYear()}</div>
             <div className="flex items-center gap-1">
-              <Button variant="outline" size="sm" onClick={() => setCursor(new Date())}>Heute</Button>
-              <Button variant="ghost" size="sm" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}><ChevronLeft className="size-4" /></Button>
-              <Button variant="ghost" size="sm" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))}><ChevronRight className="size-4" /></Button>
+              <Button variant="outline" size="sm" onClick={() => { setCursor(new Date()); setSelectedDay(todayKey); }}>Heute</Button>
+              <Button variant="ghost" size="sm" aria-label="Vorheriger Zeitraum" onClick={() => moveCursor(-1)}><ChevronLeft className="size-4" /></Button>
+              <Button variant="ghost" size="sm" aria-label="Nächster Zeitraum" onClick={() => moveCursor(1)}><ChevronRight className="size-4" /></Button>
               {loading && <Loader2 className="ml-1 size-4 animate-spin text-text-muted" />}
             </div>
           </div>
-          <div className="grid grid-cols-7 border-b border-border-subtle text-center text-xs font-medium text-text-muted">
+          {mode === 'month' && <><div className="grid grid-cols-7 border-b border-border-subtle text-center text-xs font-medium text-text-muted">
             {WD.map((d) => <div key={d} className="py-2">{d}</div>)}
           </div>
           <div className="grid grid-cols-7">
@@ -245,7 +266,14 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
                 </button>
               );
             })}
-          </div>
+          </div></>}
+          {(mode === 'week' || mode === 'day') && <CalendarTimeGrid days={grid} byDay={byDay} today={todayKey} onOpen={setDetail} onCreate={(day, time) => { openCreate(day); setForm((current) => ({ ...current, time })); }} />}
+          {mode === 'agenda' && <div className="divide-y divide-border-subtle">
+            {grid.map((day) => { const key = toKey(day); const rows = byDay[key] || []; return <section key={key} className="">
+              <button onClick={() => setSelectedDay(key)} className={`w-full border-b border-border-subtle px-3 py-3 text-left text-sm ${key === todayKey ? 'bg-accent-500/10 text-accent-500' : 'bg-elevated/40'}`}><span className="font-medium">{day.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' })}</span><span className="ml-2 text-xs text-text-muted">{rows.length}</span></button>
+              <div className="grid gap-2 p-3 md:grid-cols-2">{rows.map((a) => <button key={a.id} onClick={() => setDetail(a)} className={`rounded-md border border-border-subtle bg-surface p-2.5 text-left hover:border-accent-500 ${a.status === 'cancelled' ? 'opacity-50' : ''}`}><span className="block text-sm font-medium text-accent-500">{timeOf(a.start_at)}–{timeOf(a.end_at)}</span><span className="mt-1 block text-sm font-medium">{a.customer_name || a.title}</span><span className="mt-1 block text-xs text-text-muted">{a.assignee_name || 'Nicht zugewiesen'} · {STATUS_META[a.status]?.label}</span></button>)}{!rows.length && <p className="py-4 text-sm text-text-muted">Keine Termine</p>}<button onClick={() => openCreate(key)} className="flex items-center gap-1 py-2 text-sm text-text-muted hover:text-accent-500"><Plus className="size-3.5" /> Planen</button></div>
+            </section>; })}
+          </div>}
         </Card>
 
         {/* Tages-Panel */}
@@ -338,7 +366,7 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
           footer={
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={saving}>Abbrechen</Button>
-              <Button onClick={submitForm} disabled={saving}>
+              <Button onClick={submitForm} disabled={saving || review.loading || review.error}>
                 {saving ? <Loader2 className="size-4 animate-spin" /> : (editingId ? <Check className="size-4" /> : <Plus className="size-4" />)}
                 {editingId ? 'Speichern' : 'Anlegen'}
               </Button>
@@ -382,10 +410,11 @@ export function KalenderView({ onOpenLead }: { onOpenLead?: (leadId: string) => 
               <Field label="Ort"><input value={form.location || ''} placeholder="Telefon / vor Ort" onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} className={inputSized} /></Field>
               <Field label="Meeting-Link"><input value={form.meetingLink || ''} placeholder="https://meet…" onChange={(e) => setForm((f) => ({ ...f, meetingLink: e.target.value }))} className={inputSized} /></Field>
             </div>
-            <Field label="Notizen (steuern Teams automatisch)">
+            <Field label="Interne Notizen">
               <textarea rows={2} value={form.notes || ''} placeholder="z. B. Teams-Beratung / vor Ort / telefonischer Rückruf" onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} className={cn(inputSized, 'h-auto py-2')} />
-              <p className="mt-1 text-xs text-text-muted">Der Terminmanager liest diese internen Notizen. Digitale Quali-/Sales-Termine erhalten automatisch einen Teams-Link; vor Ort, Telefon und interne Blöcke nicht.</p>
+              <p className="mt-1 text-xs text-text-muted">Einen vorhandenen Teams- oder Videolink im Feld Meeting-Link eintragen. Es wird kein Meeting automatisch erstellt.</p>
             </Field>
+            <AppointmentConflictReview review={review} />
             <label className="flex items-center gap-2 rounded-md border border-border-subtle bg-canvas p-2.5 text-sm text-text-secondary">
               <input type="checkbox" checked={!!form.sendInvite} onChange={(e) => setForm((f) => ({ ...f, sendInvite: e.target.checked }))} className="size-4 accent-accent-500" />
               <Mail className="size-4 text-text-muted" />

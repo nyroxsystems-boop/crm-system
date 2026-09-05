@@ -1,9 +1,9 @@
 /**
  * Broschüren-Versand über Resend.
  *
- * Nutzt denselben Endpunkt wie das Admin-Dashboard beim Verfassen einer Mail:
- * POST /api/inbox/email/send. Die zentral im Admin-Dashboard hinterlegte PDF
- * wird als echter Anhang mitgesendet; der stabile Link bleibt als Fallback.
+ * POST /api/crm/leads/:id/brochure selects the stored recipient, approved
+ * country template and centrally managed PDF on the server. CRM sessions
+ * do not receive general admin mailbox privileges.
  *
  * Rechtlicher Rahmen: E-Mail-Werbung ohne vorherige Einwilligung ist nach
  * UWG §7 Abs. 2 unzulässig. Der Knopf gehört an Interessenten, die nach
@@ -15,7 +15,7 @@
  * ändert das nichts — die Auswahl muss aus Leuten bestehen, die gefragt haben.
  * Die Oberfläche sagt das beim Bestätigen noch einmal ausdrücklich.
  */
-import { getToken, type Lead } from './storage';
+import { getToken, getCurrentUser, type Lead } from './storage';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.partsunion.de';
 
@@ -63,7 +63,7 @@ export function brochureVariantForLead(lead: Pick<Lead, 'country'>): BrochureVar
 }
 
 /** Absenderadresse — muss in Resend als Sending-Address freigegeben sein. */
-const BROCHURE_FROM: string = import.meta.env.VITE_BROCHURE_FROM || 'info@partsunion.de';
+
 
 export function isBrochureConfigured(): boolean {
   return BROCHURE_URL.trim().length > 0;
@@ -178,82 +178,39 @@ export interface SendBrochureResult {
   recipientSource: string;
 }
 
-interface LeadEmailCandidate {
-  email: string;
-  source: 'lead' | 'lead_note' | 'activity';
-  sourceLabel: string;
-}
+const pendingRequests = new Map<string, string>();
 
-interface LeadEmailResolution {
-  candidates: LeadEmailCandidate[];
-  recommended: LeadEmailCandidate | null;
-  requiresChoice: boolean;
-}
-
-async function resolveBrochureRecipient(lead: Lead): Promise<LeadEmailCandidate> {
-  const direct = lead.email?.trim();
-  if (direct && direct.includes('@')) {
-    return { email: direct.toLowerCase(), source: 'lead', sourceLabel: 'Lead-E-Mail' };
-  }
-
-  const token = getToken();
-  const response = await fetch(`${API_BASE_URL}/api/crm/leads/${encodeURIComponent(lead.id)}/contact-emails`, {
-    credentials: 'include',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!response.ok) throw new Error('E-Mail-Adresse des Leads konnte nicht geprüft werden.');
-  const resolution = await response.json() as LeadEmailResolution;
-  if (resolution.recommended) return resolution.recommended;
-  if (resolution.requiresChoice) {
-    throw new Error(
-      `Mehrere E-Mail-Adressen in den Notizen gefunden (${resolution.candidates.map((c) => c.email).join(', ')}). `
-      + 'Bitte die richtige Adresse im E-Mail-Feld des Leads hinterlegen.',
-    );
-  }
-  throw new Error('Weder im Lead noch in seinen Notizen wurde eine E-Mail-Adresse gefunden.');
-}
-
-/**
- * Versendet die Broschüre an die E-Mail-Adresse des Leads.
- * Wirft bei fehlender Konfiguration, fehlender Adresse oder API-Fehler.
- */
+/** Recipient and approved templates are selected on the server. No arbitrary mail grants. */
 export async function sendBrochure(lead: Lead): Promise<SendBrochureResult> {
-  const resolved = await resolveBrochureRecipient(lead);
-  const recipient = resolved.email;
-  const variant = brochureVariantForLead(lead);
-
-  const { subject, text, html } = buildBrochureEmail(lead);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lead.email?.trim() || '')) {
+    throw new Error('Bitte eine gültige E-Mail-Adresse im E-Mail-Feld des Leads hinterlegen.');
+  }
+  const requestKey = (getCurrentUser()?.id || getCurrentUser()?.username || 'session') + ':' + lead.id;
+  const requestId = pendingRequests.get(requestKey) || crypto.randomUUID();
+  pendingRequests.set(requestKey, requestId);
   const token = getToken();
-
-  const res = await fetch(`${API_BASE_URL}/api/inbox/email/send`, {
-    credentials: 'include',
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({
-      requestId: crypto.randomUUID(),
-      from: BROCHURE_FROM,
-      to: [recipient],
-      subject,
-      body: text,
-      htmlContent: html,
-      documentSlugs: [variant.slug],
-    }),
-  });
-
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/crm/leads/${encodeURIComponent(lead.id)}/brochure`, {
+      credentials: 'include',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Partsunion-App': 'crm', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ requestId }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch {
+    throw new Error('Versandstatus unklar. Bitte denselben Versand erneut prüfen; die Anfrage wird nicht doppelt ausgelöst.');
+  }
   if (!res.ok) {
-    let message = 'Broschüre konnte nicht versendet werden.';
-    try {
-      const body = await res.json();
-      message = body?.error || body?.message || message;
-    } catch { /* Antwort ohne JSON-Body — Standardtext behalten */ }
+    let message = res.status === 409 ? 'Versand wird noch verarbeitet. Bitte denselben Versand erneut prüfen.' : 'Broschüre konnte nicht versendet werden.';
+    try { const body = await res.json(); message = body?.error || body?.message || message; if (body?.code === 'BROCHURE_SEND_FAILED') pendingRequests.delete(requestKey); } catch { /* Keep explicit failure. */ }
+    if ([400, 401, 403, 404, 422].includes(res.status)) pendingRequests.delete(requestKey);
     throw new Error(message);
   }
-
   const result = await res.json();
-  return { ...result, recipient, recipientSource: resolved.sourceLabel };
+  if (!result.success || !result.messageId) throw new Error('Der Versand wurde noch nicht bestätigt. Bitte denselben Versand erneut prüfen.');
+  pendingRequests.delete(requestKey);
+  return { ...result, recipient: result.recipient || lead.email.trim(), recipientSource: result.recipientSource || 'E-Mail-Feld' };
 }
 
 /** Pause zwischen zwei Mails. 600 ms ist unauffaellig und bleibt erträglich:
@@ -300,7 +257,7 @@ export async function sendBrochureBatch(
       ergebnis.gesendet += 1;
     } catch (e) {
       const grund = e instanceof Error ? e.message : 'Unbekannter Fehler';
-      if (grund.includes('wurde eine E-Mail-Adresse gefunden')) ergebnis.ohneAdresse += 1;
+      if (grund.includes('E-Mail-Feld des Leads hinterlegen')) ergebnis.ohneAdresse += 1;
       else ergebnis.fehler.push({ lead: lead.company || lead.email || 'Unbenannter Lead', grund });
     }
     onProgress?.(i + 1, leads.length);

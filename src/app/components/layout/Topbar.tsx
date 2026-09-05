@@ -6,7 +6,7 @@
  * Aufbau und Ziele sind unverändert — nur das Aussehen kommt vom Entwurf.
  */
 
-import { Menu, LogOut, Search, ShieldCheck, RefreshCw, Plus, Sun, Moon } from 'lucide-react';
+import { Menu, LogOut, Search, ShieldCheck, RefreshCw, Plus, Sun, Moon, KeyRound } from 'lucide-react';
 import { useState } from 'react';
 
 import { getTheme, toggleTheme, type Theme } from '../../utils/theme';
@@ -21,15 +21,9 @@ import {
 } from '../ui/dropdown-menu';
 import type { User } from '../../utils/storage';
 import { cn } from '../ui/utils';
+import { WORKSPACE_HEADER, WORKSPACE_SEARCH, WORKSPACE_ACTION, WORKSPACE_AVATAR } from './workspaceShell';
 
 /** Zurückhaltende Pille in der Kopfzeile — dieselbe Form wie im Admin. */
-const NEBEN_PILLE = cn(
-  'inline-flex shrink-0 items-center gap-[7px] whitespace-nowrap rounded-[10px]',
-  'border border-overlay/[0.07] bg-overlay/[0.04] px-3.5 py-2.5',
-  'text-[12px] font-semibold text-text-secondary transition-colors',
-  'hover:bg-overlay/[0.07] hover:text-text-primary',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50',
-);
 
 /**
  * Feste Breite des Wechselknopfs.
@@ -50,11 +44,12 @@ interface TopbarProps {
   onRefresh?: () => void;
   refreshing?: boolean;
   onLogout: () => void;
+  onChangePassword?: () => void;
   /** Öffnet die Maske für einen neuen Lead. */
   onNewLead?: () => void;
 }
 
-export function Topbar({ title, user, onOpenMobileSidebar, onOpenPalette, onRefresh, refreshing, onLogout, onNewLead }: TopbarProps) {
+export function Topbar({ title, user, onOpenMobileSidebar, onOpenPalette, onRefresh, refreshing, onLogout, onNewLead, onChangePassword }: TopbarProps) {
   const [theme, setTheme] = useState<Theme>(() => getTheme());
   const name = user?.name || user?.username || 'Admin';
   const initials = name
@@ -67,7 +62,7 @@ export function Topbar({ title, user, onOpenMobileSidebar, onOpenPalette, onRefr
 
   return (
     <header
-      className="sticky top-0 z-30 flex h-16 items-center gap-2.5 border-b border-border-subtle bg-canvas/95 px-3 py-3.5 supports-[backdrop-filter]:bg-canvas/[0.82] supports-[backdrop-filter]:backdrop-blur-[18px] md:px-8"
+      className={cn(WORKSPACE_HEADER, 'sticky top-0 z-30')}
       role="banner"
     >
       <IconButton className="md:hidden" onClick={onOpenMobileSidebar} aria-label="Navigation öffnen">
@@ -75,7 +70,7 @@ export function Topbar({ title, user, onOpenMobileSidebar, onOpenPalette, onRefr
       </IconButton>
 
       {/* Breadcrumb / Titel */}
-      <nav aria-label="Breadcrumb" className="flex min-w-0 shrink-0 items-center gap-2 text-[12px] font-medium">
+      <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-2 text-xs font-medium sm:flex">
         <span className="hidden text-text-muted sm:inline">CRM</span>
         <span aria-hidden className="hidden shrink-0 text-border-strong sm:inline">/</span>
         <span className="truncate font-bold text-text-primary" aria-current="page">
@@ -91,12 +86,12 @@ export function Topbar({ title, user, onOpenMobileSidebar, onOpenPalette, onRefr
       <button
         type="button"
         onClick={onOpenPalette}
-        className="inline-flex min-w-0 items-center gap-[9px] rounded-[10px] border border-overlay/[0.07] bg-overlay/[0.04] px-3 py-2.5 transition-colors hover:border-accent-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50 lg:w-[300px]"
+        className={WORKSPACE_SEARCH}
         aria-label="Befehlspalette öffnen"
       >
         <Search size={16} className="shrink-0 text-text-muted" aria-hidden />
         <span className="hidden min-w-0 flex-1 truncate text-left text-[12px] font-medium text-text-muted lg:inline">
-          Firma, Kontakt, E-Mail…
+          Ansicht oder Aktion suchen…
         </span>
         <kbd className="hidden shrink-0 items-center rounded-[5px] bg-overlay/[0.06] px-1.5 py-[3px] font-mono text-[10px] font-medium text-text-muted md:inline-flex">
           ⌘K
@@ -109,7 +104,7 @@ export function Topbar({ title, user, onOpenMobileSidebar, onOpenPalette, onRefr
           type="button"
           onClick={onRefresh}
           disabled={refreshing}
-          className={cn(NEBEN_PILLE, 'disabled:opacity-60')}
+          className={cn(WORKSPACE_ACTION, 'disabled:opacity-60')}
           title="Daten & Einstellungen neu laden"
           aria-label="Aktualisieren"
         >
@@ -125,7 +120,7 @@ export function Topbar({ title, user, onOpenMobileSidebar, onOpenPalette, onRefr
       <button
         type="button"
         onClick={() => setTheme(toggleTheme())}
-        className="inline-flex size-9 shrink-0 items-center justify-center rounded-[10px] border border-overlay/[0.07] bg-overlay/[0.04] text-text-tertiary transition-colors hover:bg-overlay/[0.07] hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50"
+        className={cn(WORKSPACE_ACTION, 'w-9 p-0')}
         aria-label={theme === 'dark' ? 'Zu hellem Erscheinungsbild wechseln' : 'Zu dunklem Erscheinungsbild wechseln'}
         title={theme === 'dark' ? 'Helles Erscheinungsbild' : 'Dunkles Erscheinungsbild'}
       >
@@ -140,8 +135,8 @@ export function Topbar({ title, user, onOpenMobileSidebar, onOpenPalette, onRefr
           type="button"
           onClick={onNewLead}
           className={cn(
-            'inline-flex shrink-0 items-center gap-[7px] whitespace-nowrap rounded-[10px]',
-            'bg-gradient-to-br from-accent-600 to-accent-700 px-3.5 py-2.5',
+            'inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-md',
+            'bg-accent-600 px-3 hover:bg-accent-700',
             'text-[12px] font-bold text-white',
             /* Der Verlauf bleibt UNVERÄNDERT und es wird nur der Schatten
                überblendet.
@@ -153,8 +148,7 @@ export function Topbar({ title, user, onOpenMobileSidebar, onOpenPalette, onRefr
                zu sehen.
 
                Ein Schatten ist überblendbar, deshalb bleibt er. */
-            'shadow-[0_6px_20px_rgba(92,141,255,0.34)]',
-            'transition-shadow duration-150 hover:shadow-[0_8px_26px_rgba(92,141,255,0.5)]',
+            'shadow-none transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50',
           )}
         >
@@ -170,21 +164,22 @@ export function Topbar({ title, user, onOpenMobileSidebar, onOpenPalette, onRefr
           Stelle mit genau derselben Breite. Wer dort klickt, hat den Zeiger
           danach direkt auf diesem Knopf. Der Wert steht in beiden Anwendungen
           als WECHSEL_BREITE; wer ihn ändert, muss es dort auch tun. */}
-      <a
+      {user?.app_access?.admin && <a
         href="https://admin.partsunion.de"
-        className={cn(NEBEN_PILLE, WECHSEL_BREITE)}
+        className={cn(WORKSPACE_ACTION, WECHSEL_BREITE)}
+        aria-label="Zum Admin-Panel wechseln"
         title="Zum Admin-Panel wechseln"
       >
         <ShieldCheck size={15} className="shrink-0 text-accent-500" />
         <span className="hidden md:inline">Admin</span>
-      </a>
+      </a>}
 
       {/* User-Menü — 1:1 wie im Admin: Avatar-Quadrat öffnet Dropdown mit Abmelden */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="ml-1 inline-flex size-[34px] shrink-0 items-center justify-center rounded-full border border-overlay/10 bg-gradient-to-br from-elevated-hover to-surface font-display text-[12px] font-bold text-text-secondary transition-[color,box-shadow] duration-150 hover:text-text-primary hover:ring-2 hover:ring-accent-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50"
+            className={WORKSPACE_AVATAR}
             aria-label="Benutzermenü"
           >
             {initials}
@@ -196,6 +191,7 @@ export function Topbar({ title, user, onOpenMobileSidebar, onOpenPalette, onRefr
             <span className="text-xs text-text-muted">{user?.role || 'Admin'}</span>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={onChangePassword} className="flex cursor-pointer items-center gap-2"><KeyRound size={14} /> Kontosicherheit</DropdownMenuItem>
           <DropdownMenuItem
             onSelect={(e) => {
               e.preventDefault();

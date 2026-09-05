@@ -48,6 +48,7 @@
   --color-surface: var(--bg-surface);
   --color-elevated: var(--bg-elevated);
   --color-elevated-hover: var(--bg-elevated-hover);
+  --color-border: var(--border);
   --color-border-subtle: var(--border);
   --color-border-strong: var(--border-strong);
 

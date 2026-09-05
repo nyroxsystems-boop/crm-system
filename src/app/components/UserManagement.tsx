@@ -1,288 +1,52 @@
-import { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Users as UsersIcon, Shield, UserCheck, UserX, Info } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Plus, RefreshCw, Users, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
-import { getUsers, saveUser, deleteUser, type User } from '../utils/storage';
-import { CustomSelect } from './CustomSelect';
-import {
-  Card, PageHeader, StatCard, Button, IconButton, Badge, Field, Modal, inputClass, cn, SEITEN_RAND,
-} from './ui-kit';
+import { getLeads, getTeamUsers, getTeams, saveTeam, getCurrentUser, type Lead, type User, type CrmTeam } from '../utils/storage';
+import { Card, PageHeader, Button, Badge, EmptyState, Field, Modal, inputClass, SEITEN_RAND } from './ui-kit';
+import { leadCategory } from '../utils/stages';
+import { localDayKey } from '../utils/leadQuality';
 
-// EHRLICHKEIT: Dieses CRM hat KEINE eigene Server-seitige Benutzerverwaltung. Der
-// Login läuft gegen die zentrale Admin-Auth des Bots (siehe storage.ts:authenticate);
-// hier angelegte „Benutzer" existieren NUR lokal im Browser (localStorage) und können
-// sich damit NICHT einloggen. Solange keine CRM-fähige Admin-User-API erreichbar ist,
-// ist diese Ansicht daher ehrlich als „lokale Rollen-Notiz" gekennzeichnet:
-//   • kein Passwort-Feld (würde einen echten Login-Account vortäuschen),
-//   • keine „kann sich anmelden"-Aussage,
-//   • klarer Hinweis, dass echte Zugänge zentral vergeben werden.
 export function UserManagement() {
   const [users, setUsers] = useState<User[]>([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [formData, setFormData] = useState({
-    username: '', name: '', email: '', phone: '', role: 'Vertrieb', active: true,
-  });
-
-  useEffect(() => {
-    loadUsers();
-  }, []);
-
-  const loadUsers = () => setUsers(getUsers());
-
-  const handleOpenModal = (user?: User) => {
-    if (user) {
-      setEditingUser(user);
-      setFormData({
-        username: user.username, name: user.name, email: user.email || '',
-        phone: user.phone || '', role: user.role, active: user.active,
-      });
-    } else {
-      setEditingUser(null);
-      setFormData({ username: '', name: '', email: '', phone: '', role: 'Vertrieb', active: true });
-    }
-    setIsModalOpen(true);
-  };
-
-  const handleSave = () => {
-    if (!formData.username || !formData.name) {
-      toast.error('Bitte füllen Sie alle Pflichtfelder aus.');
-      return;
-    }
-    // Bewusst OHNE Passwort: kein echter Login-Account, nur lokale Rollen-Notiz.
-    saveUser({
-      username: formData.username, name: formData.name, email: formData.email,
-      phone: formData.phone, role: formData.role, active: formData.active,
-    });
-    loadUsers();
-    setIsModalOpen(false);
-    toast.success(editingUser ? 'Eintrag aktualisiert.' : `Eintrag „${formData.name}" gespeichert (lokal).`);
-  };
-
-  const handleDelete = (username: string) => {
-    if (username === 'admin') {
-      toast.error('Der Admin-Eintrag kann nicht gelöscht werden.');
-      return;
-    }
-    if (confirm('Möchten Sie diesen Eintrag wirklich löschen?')) {
-      deleteUser(username);
-      loadUsers();
-      toast.success('Eintrag gelöscht.');
-    }
-  };
-
-  const activeUsers = users.filter((u) => u.active).length;
-  const inactiveUsers = users.filter((u) => !u.active).length;
-
-  return (
-    <div className={cn(SEITEN_RAND, 'space-y-5')}>
-      <PageHeader
-        title="Team-Notizen"
-        subtitle="Lokale Rollen-Übersicht des Vertriebsteams (kein Login-Account)."
-        actions={
-          <Button onClick={() => handleOpenModal()}>
-            <Plus className="size-4" />
-            Neuer Eintrag
-          </Button>
-        }
-      />
-
-      {/* Ehrlicher Hinweis: keine echten Zugänge. */}
-      <div className="flex items-start gap-3 rounded-lg border border-status-info/30 bg-status-info/10 px-4 py-3 text-sm text-status-info">
-        <Info className="mt-0.5 size-4 shrink-0" />
-        <div>
-          <p className="font-medium">Lokale Rollen-Notiz — kein echter Login-Account</p>
-          <p className="mt-0.5 text-text-secondary">
-            Diese Liste dient nur als interne Übersicht über Teammitglieder und ihre
-            Rollen und wird ausschließlich in diesem Browser gespeichert. Einträge hier
-            erstellen keinen Zugang — der Login erfolgt zentral über das Plattform-Konto.
-            Echte Zugänge werden von einer Administratorin/einem Administrator vergeben.
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <StatCard icon={<UsersIcon className="size-4" />} label="Alle Einträge" value={users.length} />
-        <StatCard icon={<UserCheck className="size-4" />} label="Aktiv" value={activeUsers} />
-        <StatCard icon={<UserX className="size-4" />} label="Inaktiv" value={inactiveUsers} />
-      </div>
-
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border-subtle bg-elevated/50">
-                {['Mitglied', 'Kontakt', 'Rolle', 'Status', 'Kürzel', ''].map((h, i) => (
-                  <th key={i} className="label-technical px-5 py-3 text-left text-text-muted">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-subtle">
-              {users.map((user) => (
-                <tr key={user.username} className="transition-colors hover:bg-elevated">
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={cn(
-                          'flex size-9 items-center justify-center rounded-md font-semibold',
-                          user.role === 'Admin'
-                            ? 'bg-status-warning/15 text-status-warning'
-                            : 'bg-accent-500/15 text-accent-500',
-                        )}
-                      >
-                        {user.role === 'Admin' ? <Shield className="size-4" /> : user.name[0]}
-                      </div>
-                      <div>
-                        <div className="font-medium text-text-primary">{user.name}</div>
-                        {user.createdAt && (
-                          <div className="text-xs text-text-muted">
-                            seit {new Date(user.createdAt).toLocaleDateString('de-DE')}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3">
-                    {user.email && <div className="text-text-secondary">{user.email}</div>}
-                    {user.phone && <div className="text-xs text-text-muted">{user.phone}</div>}
-                    {!user.email && !user.phone && <span className="text-text-muted">—</span>}
-                  </td>
-                  <td className="px-5 py-3">
-                    <Badge tone={user.role === 'Admin' ? 'warning' : 'accent'}>{user.role}</Badge>
-                  </td>
-                  <td className="px-5 py-3">
-                    <Badge tone={user.active ? 'success' : 'neutral'} dot>
-                      {user.active ? 'Aktiv' : 'Inaktiv'}
-                    </Badge>
-                  </td>
-                  <td className="px-5 py-3">
-                    <code className="rounded bg-elevated px-2 py-1 font-mono text-xs text-text-secondary">
-                      {user.username}
-                    </code>
-                  </td>
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-1">
-                      <IconButton className="size-8" onClick={() => handleOpenModal(user)} aria-label="Bearbeiten">
-                        <Edit className="size-4" />
-                      </IconButton>
-                      {user.username !== 'admin' && (
-                        <IconButton className="size-8" tone="danger" onClick={() => handleDelete(user.username)} aria-label="Löschen">
-                          <Trash2 className="size-4" />
-                        </IconButton>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      {isModalOpen && (
-        <Modal
-          onClose={() => setIsModalOpen(false)}
-          title={editingUser ? 'Eintrag bearbeiten' : 'Neuer Eintrag'}
-          subtitle={editingUser ? 'Bearbeiten Sie die Team-Notiz.' : 'Erfassen Sie ein Teammitglied (lokale Notiz, kein Zugang).'}
-          size="lg"
-          footer={
-            <>
-              <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
-                Abbrechen
-              </Button>
-              <Button onClick={handleSave}>{editingUser ? 'Speichern' : 'Eintrag speichern'}</Button>
-            </>
-          }
-        >
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSave();
-            }}
-            className="space-y-6"
-          >
-            <div className="flex items-start gap-3 rounded-lg border border-status-info/30 bg-status-info/10 px-4 py-3 text-sm text-status-info">
-              <Info className="mt-0.5 size-4 shrink-0" />
-              <p className="text-text-secondary">
-                Dieser Eintrag erstellt keinen Login-Zugang. Er wird nur lokal als
-                Rollen-Notiz gespeichert.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <h4 className="label-technical text-text-muted">Basisinformationen</h4>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Field label="Kürzel" required hint={editingUser ? 'Kann nicht geändert werden.' : 'Internes Kürzel, z.B. mschmidt.'}>
-                  <input
-                    type="text"
-                    required
-                    value={formData.username}
-                    disabled={!!editingUser}
-                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                    placeholder="z.B. mschmidt"
-                    className={cn(inputClass, 'h-9 disabled:opacity-60')}
-                  />
-                </Field>
-                <Field label="Vollständiger Name" required>
-                  <input
-                    type="text"
-                    required
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="z.B. Max Schmidt"
-                    className={cn(inputClass, 'h-9')}
-                  />
-                </Field>
-                <Field label="E-Mail">
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    placeholder="max@firma.de"
-                    className={cn(inputClass, 'h-9')}
-                  />
-                </Field>
-                <Field label="Telefon">
-                  <input
-                    type="tel"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    placeholder="+49 123 456789"
-                    className={cn(inputClass, 'h-9')}
-                  />
-                </Field>
-              </div>
-            </div>
-
-            <div className="space-y-4 border-t border-border-subtle pt-5">
-              <h4 className="label-technical text-text-muted">Rolle</h4>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Field label="Rolle" required>
-                  <CustomSelect
-                    value={formData.role}
-                    onChange={(value) => setFormData({ ...formData, role: value })}
-                    options={['Vertrieb', 'Admin', 'Manager']}
-                    disabled={editingUser?.username === 'admin'}
-                  />
-                </Field>
-              </div>
-
-              <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-border-subtle bg-elevated/40 p-3">
-                <input
-                  type="checkbox"
-                  checked={formData.active}
-                  onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
-                  className="size-4 accent-[var(--accent-500)]"
-                />
-                <span className="text-sm font-medium text-text-primary">
-                  Mitglied ist im Team aktiv
-                </span>
-              </label>
-            </div>
-          </form>
-        </Modal>
-      )}
-    </div>
-  );
+  const [teams, setTeams] = useState<CrmTeam[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [selectedTeam, setSelectedTeam] = useState('all');
+  const [editing, setEditing] = useState<(Omit<CrmTeam, 'id'> & { id?: string }) | null>(null);
+  const [saving, setSaving] = useState(false);
+  const current = getCurrentUser();
+  const canManage = current?.role === 'manager' || current?.app_access?.admin;
+  async function load() {
+    setLoading(true); setError(false);
+    try { const [team, rows, groups] = await Promise.all([getTeamUsers(), getLeads(), getTeams()]); setUsers(team); setLeads(rows); setTeams(groups); }
+    catch { setError(true); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { void load(); }, []);
+  async function save() {
+    if (!editing?.name.trim()) return;
+    setSaving(true);
+    try { await saveTeam(editing); setEditing(null); await load(); toast.success('Team gespeichert.'); }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Speichern fehlgeschlagen.'); }
+    finally { setSaving(false); }
+  }
+  const today = localDayKey(new Date());
+  const group = teams.find((team) => team.id === selectedTeam);
+  const visible = group ? users.filter((user) => user.id && group.memberIds.includes(user.id)) : users;
+  return <div className={SEITEN_RAND + ' space-y-5'}>
+    <PageHeader title="Vertriebsteam" subtitle="CRM-Zugänge, Teams, Zuständigkeiten und aktuelle Arbeitslast." actions={<><Button variant="secondary" onClick={() => void load()} disabled={loading}><RefreshCw className="size-4" /> Aktualisieren</Button>{canManage && <Button onClick={() => setEditing({ name: '', description: '', active: true, memberIds: [] })}><Plus className="size-4" /> Team anlegen</Button>}</>} />
+    <div className="flex flex-wrap gap-2"><button onClick={() => setSelectedTeam('all')} className={'rounded-md border px-3 py-2 text-sm ' + (selectedTeam === 'all' ? 'border-accent-500 text-accent-500' : 'border-border-subtle bg-surface')}>Alle Mitarbeiter · {users.length}</button>{teams.map((team) => <div key={team.id} className={'flex items-center rounded-md border bg-surface ' + (selectedTeam === team.id ? 'border-accent-500 text-accent-500' : 'border-border-subtle')}><button className="px-3 py-2 text-sm" onClick={() => setSelectedTeam(team.id)}>{team.name} · {team.memberIds.length}{!team.active && ' (inaktiv)'}</button>{canManage && <button className="px-2 py-2 text-text-muted hover:text-text-primary" aria-label={team.name + ' bearbeiten'} onClick={() => setEditing(team)}><Pencil className="size-3.5" /></button>}</div>)}</div>
+    {group?.description && <p className="text-sm text-text-secondary">{group.description}</p>}
+    <p className="text-sm text-text-secondary">Zugänge werden zentral freigegeben. Teammitgliedschaften organisieren die Zusammenarbeit und erteilen keine zusätzlichen Plattformrechte.</p>
+    {error && <p className="text-sm text-status-danger" role="alert">Das Vertriebsteam konnte nicht geladen werden. Bitte erneut versuchen.</p>}
+    <Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-elevated"><tr>{['Mitarbeiter', 'Rolle', 'Offene Leads', 'Fällige Wiedervorlagen', 'Ohne nächsten Schritt'].map((label) => <th className="px-5 py-4 text-left font-medium text-text-secondary" key={label}>{label}</th>)}</tr></thead><tbody>{visible.map((user) => {
+      const owned = leads.filter((lead) => lead.assignedTo?.toLowerCase() === user.username.toLowerCase() && leadCategory(lead) === 'open');
+      return <tr key={user.id || user.username} className="border-t border-border-subtle"><td className="px-5 py-4"><div className="font-medium">{user.name}</div><div className="mt-1 text-text-muted">{user.email || user.username}</div></td><td className="px-5 py-4"><Badge tone="neutral">{user.role === 'manager' ? 'Vertriebsleitung' : 'Vertrieb'}</Badge></td><td className="px-5 py-4 tabular-nums">{owned.length}</td><td className="px-5 py-4 tabular-nums">{owned.filter((lead) => lead.nextFollowUpDate && lead.nextFollowUpDate.slice(0, 10) <= today).length}</td><td className="px-5 py-4 tabular-nums">{owned.filter((lead) => !lead.nextFollowUpDate).length}</td></tr>;
+    })}</tbody></table></div>{loading && <p role="status" className="p-5 text-sm text-text-muted">Team wird geladen…</p>}{!loading && !error && !visible.length && <EmptyState icon={<Users className="size-5" />} title="Keine Mitarbeiter in dieser Ansicht" description="Aktive CRM-Mitarbeiter können einem Team zugeordnet werden." />}</Card>
+    <p className="text-sm text-text-muted">{leads.filter((lead) => !lead.assignedTo && leadCategory(lead) === 'open').length} offene Leads sind noch keinem Mitarbeiter zugewiesen. Die Zuweisung erfolgt in der Leadliste.</p>
+    {editing && <Modal onClose={() => setEditing(null)} title={editing.id ? 'Team bearbeiten' : 'Team anlegen'} size="md" footer={<><Button variant="secondary" onClick={() => setEditing(null)} disabled={saving}>Abbrechen</Button><Button onClick={() => void save()} disabled={saving || !editing.name.trim()}>{saving ? 'Speichern…' : 'Team speichern'}</Button></>}>
+      <div className="space-y-4"><Field label="Teamname" required><input className={inputClass} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field><Field label="Beschreibung"><textarea className={inputClass} rows={3} value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></Field><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Team aktiv</label><fieldset><legend className="mb-2 text-sm font-medium">Mitglieder</legend><div className="max-h-64 space-y-2 overflow-auto">{users.filter((user) => user.id).map((user) => <label className="flex items-center gap-3 rounded-md border border-border-subtle p-3" key={user.id}><input type="checkbox" checked={editing.memberIds.includes(user.id!)} onChange={(e) => setEditing({ ...editing, memberIds: e.target.checked ? [...editing.memberIds, user.id!] : editing.memberIds.filter((id) => id !== user.id) })} /><span className="text-sm">{user.name}<span className="ml-2 text-text-muted">{user.email}</span></span></label>)}</div></fieldset></div>
+    </Modal>}
+  </div>;
 }

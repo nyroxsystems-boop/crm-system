@@ -15,7 +15,6 @@ import {
   LayoutDashboard,
   Users,
   Workflow,
-  Mail,
   Radar,
   BarChart3,
   Calendar,
@@ -31,6 +30,8 @@ import {
 import { getLeads } from '../../utils/storage';
 import { cn } from '../ui/utils';
 import { berichteVorwaermen } from '../../vorwaermen';
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from '../ui/sheet';
+import { WORKSPACE_BRAND, WORKSPACE_MARK, WORKSPACE_NAV_ITEM, WORKSPACE_NAV_ACTIVE } from './workspaceShell';
 
 export type ViewId =
   | 'dashboard'
@@ -40,6 +41,7 @@ export type ViewId =
   | 'reports'
   | 'kalender'
   | 'settings'
+  | 'security'
   | 'users'
   | 'pipelineSettings';
 
@@ -60,20 +62,21 @@ export const NAV_SECTIONS: NavSection[] = [
     id: 'crm',
     label: 'CRM',
     items: [
-      { view: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { view: 'dashboard', label: 'Arbeitsübersicht', icon: LayoutDashboard },
       { view: 'leads', label: 'Leads', icon: Users },
       { view: 'pipeline', label: 'Pipeline', icon: Workflow },
-      { view: 'scraper', label: 'Lead-Scraper', icon: Radar },
+      { view: 'scraper', label: 'Lead-Quellen', icon: Radar },
       { view: 'reports', label: 'Berichte', icon: BarChart3 },
       { view: 'kalender', label: 'Kalender', icon: Calendar },
     ],
   },
   {
     id: 'admin',
-    label: 'Administration',
+    label: 'Organisation',
     items: [
       { view: 'settings', label: 'Einstellungen', icon: SettingsIcon },
-      { view: 'users', label: 'Benutzerverwaltung', icon: UserCog },
+      { view: 'security', label: 'Kontosicherheit', icon: UserCog },
+      { view: 'users', label: 'Vertriebsteam', icon: UserCog },
       { view: 'pipelineSettings', label: 'Pipeline-Setup', icon: Layers },
     ],
   },
@@ -168,12 +171,9 @@ export function Sidebar({ activeView, onNavigate, mobileOpen, onMobileOpenChange
   const handleNavigate = useCallback(
     (view: ViewId) => {
       onNavigate(view);
-      if (angeheftet) return;
       setHovering(false);
-      setCollapsed(true);
-      schreib(STORAGE_KEY, true);
     },
-    [onNavigate, angeheftet],
+    [onNavigate],
   );
 
   // ⌘\ / Ctrl+\ Toggle
@@ -202,7 +202,7 @@ export function Sidebar({ activeView, onNavigate, mobileOpen, onMobileOpenChange
             // Redesign: durchscheinende Verlaufsfläche statt deckendem Grau.
             // Die Leiste sitzt damit auf dem Lichtverlauf der Seite, statt ihn
             // zu verdecken.
-            'bg-gradient-to-b from-overlay/[0.028] to-overlay/[0.006]',
+            'bg-surface',
             'transition-[width] duration-200 ease-out',
             collapsed ? 'w-16' : 'w-64',
           )}
@@ -240,13 +240,10 @@ export function Sidebar({ activeView, onNavigate, mobileOpen, onMobileOpenChange
       </div>
 
       {/* Mobile Drawer */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true">
-          <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={() => onMobileOpenChange(false)}
-          />
-          <aside className="animate-slide-in-up absolute inset-y-0 left-0 flex w-64 flex-col border-r border-border-subtle bg-surface">
+      <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
+        <SheetContent side="left" className="w-64 gap-0 border-border-subtle bg-surface p-0" onCloseAutoFocus={event => { event.preventDefault(); document.querySelector<HTMLButtonElement>('[aria-label="Navigation öffnen"]')?.focus(); }}>
+          <SheetTitle className="sr-only">CRM-Navigation</SheetTitle>
+          <SheetDescription className="sr-only">Arbeitsbereich auswählen</SheetDescription>
             <Brand collapsed={false} />
             <Nav
               activeView={activeView}
@@ -256,9 +253,8 @@ export function Sidebar({ activeView, onNavigate, mobileOpen, onMobileOpenChange
               }}
               collapsed={false}
             />
-          </aside>
-        </div>
-      )}
+        </SheetContent>
+      </Sheet>
     </>
   );
 }
@@ -282,11 +278,11 @@ function Brand({ collapsed }: { collapsed: boolean }) {
   return (
     <div
       className={cn(
-        'flex shrink-0 items-center gap-2.5 px-4 pb-4 pt-5',
+        WORKSPACE_BRAND,
         collapsed && 'justify-center px-0',
       )}
     >
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-[9px] bg-gradient-to-br from-accent-500 to-accent-700">
+      <span className={WORKSPACE_MARK}>
         <img
           src="/partsunion-symbol-weiss.png"
           alt="Partsunion"
@@ -300,8 +296,8 @@ function Brand({ collapsed }: { collapsed: boolean }) {
           <span className="truncate font-display text-sm font-bold tracking-[0.02em] text-text-primary">
             Partsunion
           </span>
-          <span className="font-mono text-[9px] font-semibold tracking-[0.18em] text-accent-500">
-            SALES CRM
+          <span className="text-xs font-medium text-text-muted">
+            CRM · Vertrieb
           </span>
         </span>
       )}
@@ -319,11 +315,11 @@ function Nav({
   collapsed: boolean;
 }) {
   return (
-    <nav className="flex-1 overflow-y-auto px-0 pb-3 pt-1.5" aria-label="Navigation">
+    <nav className="flex-1 overflow-y-auto px-0 pb-3 pt-5" aria-label="Navigation">
       {NAV_SECTIONS.map((section) => (
-        <div key={section.id} className="mb-5">
+        <div key={section.id} className="mb-4">
           {!collapsed && (
-            <div className="mb-2 px-[22px] font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-text-muted">
+            <div className="mb-2 px-[22px] text-xs font-medium text-text-muted">
               {section.label}
             </div>
           )}
@@ -346,18 +342,19 @@ function Nav({
                     onMouseEnter={item.view === 'reports' ? berichteVorwaermen : undefined}
                     onFocus={item.view === 'reports' ? berichteVorwaermen : undefined}
                     title={collapsed ? item.label : undefined}
+                    aria-label={collapsed ? item.label : undefined}
                     aria-current={isActive ? 'page' : undefined}
                     className={cn(
                       // Redesign: 10 px Radius, Manrope halbfett, durchscheinende
                       // Auflage beim Ueberfahren statt deckender Flaeche.
-                      'group relative mx-3 flex w-[calc(100%-1.5rem)] items-center rounded-[10px] py-[9px] text-[12.5px] font-semibold transition-colors',
+                      WORKSPACE_NAV_ITEM, 'w-[calc(100%-1.5rem)]',
                       collapsed ? 'justify-center px-0' : 'gap-[11px] px-[11px]',
                       isActive
                         // Waagerechter Akzentverlauf, der nach rechts auslaeuft
                         // text-text-primary, NICHT text-white: der Verlauf ist
                         // durchscheinend, und im Hellmodus wäre weisse Schrift
                         // darauf unsichtbar. Im Admin am Bild nachgemessen.
-                        ? 'bg-gradient-to-r from-accent-500/[0.16] via-accent-500/[0.03] to-transparent text-text-primary'
+                        ? WORKSPACE_NAV_ACTIVE
                         : 'text-text-tertiary hover:bg-overlay/[0.05] hover:text-text-primary',
                     )}
                   >

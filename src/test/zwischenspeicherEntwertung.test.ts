@@ -43,7 +43,8 @@ describe('Entwertung des Zwischenspeichers', () => {
     });
 
     it('das Abmelden leert alles', () => {
-        const start = QUELLE.indexOf('export function logout()');
+        expect(rumpf('logout')).toMatch(/clearSession\(\)/);
+        const start = QUELLE.indexOf('function clearSession()');
         expect(QUELLE.slice(start, start + 400)).toMatch(/vergessen\(\)/);
     });
 

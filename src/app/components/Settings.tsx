@@ -91,7 +91,8 @@ export function Settings() {
     // Bei Status: sagen, was daran hängt. Ein Lead mit einem Status, den es
     // nicht mehr gibt, behält ihn — taucht aber in keinem Filter mehr auf.
     // Das darf man nicht aus Versehen tun.
-    const betroffen = key === 'statuses' ? ((await belegungHolen())[value] ?? 0) : 0;
+    let betroffen = 0;
+    try { betroffen = key === 'statuses' ? ((await belegungHolen())[value] ?? 0) : 0; } catch { toast.error('Lead-Belegung konnte nicht geprüft werden. Bitte erneut versuchen.'); return; }
     const zusatz = betroffen > 0
       ? `\n\n${betroffen} ${betroffen === 1 ? 'Lead steht' : 'Leads stehen'} auf diesem Status. `
         + `${betroffen === 1 ? 'Er behält' : 'Sie behalten'} ihn, aber er taucht dann in keinem Filter mehr auf.`

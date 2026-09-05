@@ -25,7 +25,7 @@ export type Theme = 'light' | 'dark';
 const SCHLUESSEL = 'crm_theme';
 
 export function getTheme(): Theme {
-  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
 }
 
 export function setTheme(theme: Theme): void {
@@ -53,8 +53,8 @@ export function toggleTheme(): Theme {
 export function applyStoredTheme(): void {
   try {
     const v = window.localStorage.getItem(SCHLUESSEL);
-    setTheme(v === 'light' ? 'light' : 'dark');
+    setTheme(v === 'dark' ? 'dark' : 'light');
   } catch {
-    setTheme('dark');
+    setTheme('light');
   }
 }

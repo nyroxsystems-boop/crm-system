@@ -1,6 +1,9 @@
 import { merken, vergessen, vergessenMitPraefix, SCHLUESSEL } from './zwischenspeicher';
 
 export interface User {
+  id?: string;
+  must_change_password?: boolean;
+  app_access?: { admin: boolean; crm: boolean };
   username: string;
   name: string;
   email?: string;
@@ -25,6 +28,9 @@ export interface Lead {
   country?: string;
   address?: string;
   status: string;
+  stageId?: string;
+  stageCategory?: 'open' | 'won' | 'lost';
+  stageEnteredAt?: string;
   source: string;
   value?: number;
   priority?: string;
@@ -136,6 +142,7 @@ export interface Settings {
 }
 
 export interface PipelineStage {
+  category?: 'open' | 'won' | 'lost';
   id: string;
   name: string;
   color: string;
@@ -144,11 +151,7 @@ export interface PipelineStage {
   isActive: boolean;
 }
 
-const LEADS_KEY = 'haendler_crm_leads';
-const ACTIVITIES_KEY = 'haendler_crm_activities';
 const SETTINGS_KEY = 'haendler_crm_settings';
-const USERS_KEY = 'haendler_crm_users';
-const PASSWORDS_KEY = 'haendler_crm_passwords';
 const CURRENT_USER_KEY = 'haendler_crm_current_user';
 const TOKEN_KEY = 'haendler_crm_token';
 
@@ -169,108 +172,6 @@ const defaultSettings: Settings = {
   currency: 'EUR',
   statuses: ['Neu', 'Kontaktiert', 'Qualifiziert', 'Angebot', 'Verhandlung', 'Gewonnen', 'Verloren'],
 };
-
-const defaultUsers: User[] = [
-  { username: 'admin', name: 'Administrator', role: 'Admin', active: true, createdAt: new Date().toISOString() },
-];
-
-// ÜBERHOLT — der beschriebene Zustand besteht nicht mehr.
-//
-// Hier stand jahrelang: „this CRM has NO server-side auth — login() is a pure
-// localStorage check and the lead API is called without any credential."
-// Beides trifft nicht mehr zu, nachgeprüft am 2026-07-28:
-//   • Die Anmeldung läuft über authenticate() gegen /api/admin-auth/login
-//     (weiter unten in dieser Datei) und liefert ein echtes Sitzungstoken.
-//   • Von 35 API-Aufrufen in dieser Datei geht genau EINER ohne Anmeldedaten
-//     raus: der Login selbst. Alle übrigen 34 senden authHeaders().
-//
-// Ein Sicherheitshinweis, der eine längst geschlossene Lücke beschreibt, ist
-// nicht harmlos: Er löst entweder unnötigen Alarm aus, oder jemand „repariert"
-// etwas, das bereits in Ordnung ist — und baut dabei etwas kaputt.
-//
-// Was von der alten Bauweise übrig ist: defaultPasswords und PASSWORDS_KEY.
-// Sie werden NICHT mehr befüllt — initializeUsers() ruft niemand mehr auf, und
-// UserManagement.tsx übergibt bewusst kein Passwort (die Ansicht heißt dort
-// „Team-Notizen" und sagt beim Speichern ausdrücklich „lokal"). Stehen bleiben
-// sie nur, damit ein Browser mit Altbestand aus einer früheren Fassung nicht
-// beim Lesen stolpert.
-const defaultPasswords: Record<string, string> = {
-  admin: import.meta.env.VITE_CRM_ADMIN_PASSWORD || 'CHANGE_ME_set_VITE_CRM_ADMIN_PASSWORD',
-};
-
-// Initialize users and passwords
-export function initializeUsers() {
-  const users = localStorage.getItem(USERS_KEY);
-  const passwords = localStorage.getItem(PASSWORDS_KEY);
-
-  if (!users) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(defaultUsers));
-  }
-  if (!passwords) {
-    localStorage.setItem(PASSWORDS_KEY, JSON.stringify(defaultPasswords));
-  }
-}
-
-// User Management
-export function getUsers(): User[] {
-  try {
-    const data = localStorage.getItem(USERS_KEY);
-    return data ? JSON.parse(data) : defaultUsers;
-  } catch (error) {
-    console.error('Error loading users:', error);
-    return defaultUsers;
-  }
-}
-
-export function saveUser(user: Partial<User>, password?: string): void {
-  const users = getUsers();
-  const passwords = JSON.parse(localStorage.getItem(PASSWORDS_KEY) || '{}');
-  const now = new Date().toISOString();
-
-  const existingIndex = users.findIndex(u => u.username === user.username);
-
-  if (existingIndex !== -1) {
-    // Update existing user
-    users[existingIndex] = { ...users[existingIndex], ...user };
-    if (password) {
-      passwords[user.username!] = password;
-    }
-  } else {
-    // Create new user
-    const newUser: User = {
-      username: user.username || '',
-      name: user.name || '',
-      email: user.email,
-      phone: user.phone,
-      role: user.role || 'Vertrieb',
-      active: user.active !== undefined ? user.active : true,
-      createdAt: now,
-    };
-    users.push(newUser);
-    if (password) {
-      passwords[user.username!] = password;
-    }
-  }
-
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  localStorage.setItem(PASSWORDS_KEY, JSON.stringify(passwords));
-}
-
-export function deleteUser(username: string): void {
-  const users = getUsers();
-  const passwords = JSON.parse(localStorage.getItem(PASSWORDS_KEY) || '{}');
-
-  const filtered = users.filter(u => u.username !== username);
-  delete passwords[username];
-
-  localStorage.setItem(USERS_KEY, JSON.stringify(filtered));
-  localStorage.setItem(PASSWORDS_KEY, JSON.stringify(passwords));
-}
-
-export function getUserPassword(username: string): string | null {
-  const passwords = JSON.parse(localStorage.getItem(PASSWORDS_KEY) || '{}');
-  return passwords[username] || null;
-}
 
 // --------------------------------------------------------------------------
 // Auth — REAL server-side admin authentication (Bot /api/admin-auth/login)
@@ -370,22 +271,30 @@ function setToken(token: string): void {
 /** Authorization-Header für die Bot-API (leer, falls nicht eingeloggt). */
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const token = getToken();
-  return token ? { Authorization: `Bearer ${token}`, ...extra } : { ...extra };
+  return { 'X-Partsunion-App': 'crm', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra };
 }
 
 /**
  * Echte Admin-Anmeldung gegen den Bot. Bei Erfolg wird Session-Token + User
  * persistiert. Gibt den User zurück (oder null bei falschen Daten / Netzfehler).
  */
-export async function authenticate(username: string, password: string): Promise<User | null> {
+export class AuthenticationChallenge extends Error {
+  constructor(public readonly invalid = false) { super(invalid ? 'Der Sicherheitscode ist ungültig. Bitte erneut versuchen.' : 'Bitte den Code aus deiner Authenticator-App oder einen Wiederherstellungscode eingeben.'); }
+}
+
+export async function authenticate(username: string, password: string, totpCode?: string): Promise<User | null> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/admin-auth/login`, {
       credentials: 'include',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, app: 'crm', ...(totpCode ? { totp_code: totpCode } : {}) }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      if (error.requires_2fa || error.code === 'MFA_REQUIRED' || error.code === 'MFA_INVALID') throw new AuthenticationChallenge(error.code === 'MFA_INVALID');
+      return null;
+    }
     const data = await res.json();
 
     /**
@@ -406,14 +315,18 @@ export async function authenticate(username: string, password: string): Promise<
      * aussen wie ein falsches Kennwort aussah. Die Anmeldung war zu dem
      * Zeitpunkt serverseitig längst erfolgreich und das Cookie gesetzt.
      */
+    clearSession();
     const token: string | undefined = data?.access || data?.token;
     if (token) setToken(token);
 
     const user: User = {
+      id: data?.user?.id,
       username: data?.user?.username || username,
       name: data?.user?.username || username,
       email: data?.user?.email,
-      role: data?.user?.role || 'Admin',
+      role: data?.user?.crm_role || data?.user?.role || 'sales',
+      app_access: data?.user?.app_access,
+      must_change_password: Boolean(data?.user?.must_change_password || data?.must_change_password),
       active: true,
       createdAt: new Date().toISOString(),
     };
@@ -423,6 +336,7 @@ export async function authenticate(username: string, password: string): Promise<
     if (!PERSIST_TOKEN_IN_LOCALSTORAGE) speicher('local')?.removeItem(CURRENT_USER_KEY);
     return user;
   } catch (error) {
+    if (error instanceof AuthenticationChallenge) throw error;
     console.error('Login failed:', error);
     return null;
   }
@@ -430,10 +344,20 @@ export async function authenticate(username: string, password: string): Promise<
 
 // Logout — Token + User aus BEIDEN Speichern entfernen (auch ein evtl. Alt-Token
 // aus localStorage), damit nach dem Abmelden keine Session-Reste at-rest bleiben.
-export function logout() {
+export async function logout(): Promise<void> {
+  const headers = authHeaders({ 'Content-Type': 'application/json' });
+  clearSession();
+  const res = await fetch(`${API_BASE_URL}/api/admin-auth/logout`, {
+    credentials: 'include', method: 'POST', headers, body: JSON.stringify({ app: 'crm' }),
+  });
+  if (!res.ok && res.status !== 401) throw new Error('Die Sitzung konnte nicht beendet werden. Bitte erneut abmelden.');
+}
+
+function clearSession() {
   // Alles Gemerkte weg: sonst saehe der naechste Anmelder auf demselben
   // Rechner fuer bis zu eine Minute die Daten des vorigen.
   vergessen();
+  speicher('local')?.removeItem('haendler_crm_passwords');
   for (const art of ['session', 'local'] as const) {
     const s = speicher(art);
     s?.removeItem(CURRENT_USER_KEY);
@@ -477,9 +401,69 @@ const LEADS_PATH = '/api/crm/leads';
  * kryptischer 403-Fehler in der Konsole. Nur EINMAL (nach logout kein Token mehr).
  */
 function onAuthExpired(): void {
-  if (!getToken()) return; // schon abgemeldet → keine Reload-Schleife
-  logout();
-  if (typeof window !== 'undefined') window.location.reload();
+  clearSession();
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('crm:session-expired'));
+}
+
+export async function validateSession(): Promise<User | null> {
+  const res = await fetch(`${API_BASE_URL}/api/admin-auth/me?app=crm`, { credentials: 'include', headers: authHeaders() });
+  if (res.status === 401 || res.status === 403) { clearSession(); return null; }
+  await assertResponse(res, 'Sitzung konnte nicht geprüft werden.');
+  const data = await res.json();
+  const raw = data.user || data;
+  if (!raw.username || raw.app_access?.crm === false) { clearSession(); return null; }
+  const user: User = { id: raw.id, username: raw.username, name: raw.full_name || raw.username, email: raw.email,
+    role: raw.crm_role || raw.role || 'sales', active: true, app_access: raw.app_access,
+    must_change_password: Boolean(raw.must_change_password || data.must_change_password) };
+  sessionStore()?.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+  return user;
+}
+
+export async function accountRequest(action: 'request-reset' | 'reset-password' | 'change-password', body: Record<string, string>): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/admin-auth/${action}`, { credentials: 'include', method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ ...body, app: 'crm' }) });
+  await assertResponse(res, action === 'request-reset' ? 'Anfrage konnte nicht gesendet werden.' : 'Passwort konnte nicht geändert werden.');
+  if (action !== 'request-reset') clearSession();
+}
+
+export async function mfaRequest<T = { secret: string; otpauth_url: string }>(action?: 'enroll' | 'confirm', body?: Record<string, string>): Promise<T> {
+  const res = await fetch(API_BASE_URL + '/api/admin-auth/mfa' + (action ? '/' + action : ''), { credentials: 'include',
+    method: action ? 'POST' : 'GET', headers: authHeaders({ 'Content-Type': 'application/json' }), ...(action ? { body: JSON.stringify({ ...body, app: 'crm' }) } : {}) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (!action && res.status === 401) onAuthExpired();
+    throw new Error(res.status === 429 ? 'Zu viele Versuche. Bitte später erneut versuchen.' : data.message || data.error || 'Sicherheitsänderung fehlgeschlagen.');
+  }
+  return data as T;
+}
+
+async function assertResponse(res: Response, message: string): Promise<void> {
+  if (res.ok) return;
+  if (res.status === 401) onAuthExpired();
+  if (res.status === 429) throw new Error('Zu viele Versuche. Bitte in einigen Minuten erneut versuchen.');
+  throw new Error(message);
+}
+
+export async function getTeamUsers(): Promise<User[]> {
+  const res = await fetch(`${API_BASE_URL}/api/crm/users`, { credentials: 'include', headers: authHeaders() });
+  await assertResponse(res, 'Vertriebsteam konnte nicht geladen werden.');
+  const data = await res.json();
+  return (Array.isArray(data) ? data : data.users || []).map((u: { id: string; username: string; full_name?: string; email?: string; role: string }) =>
+    ({ id: u.id, username: u.username, name: u.full_name || u.username, email: u.email, role: u.role, active: true }));
+}
+
+export interface CrmTeam { id: string; name: string; description: string; active: boolean; memberIds: string[] }
+export async function getTeams(): Promise<CrmTeam[]> {
+  const res = await fetch(`${API_BASE_URL}/api/crm/teams`, { credentials: 'include', headers: authHeaders() });
+  await assertResponse(res, 'Teams konnten nicht geladen werden.');
+  return (await res.json()).teams || [];
+}
+export async function saveTeam(team: Omit<CrmTeam, 'id'> & { id?: string }): Promise<void> {
+  const { id, ...body } = team;
+  const res = await fetch(`${API_BASE_URL}/api/crm/teams${id ? `/${encodeURIComponent(id)}` : ''}`, {
+    credentials: 'include', method: id ? 'PATCH' : 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body),
+  });
+  await assertResponse(res, 'Team konnte nicht gespeichert werden. Prüfe Name, Mitglieder und deine Berechtigung.');
 }
 
 /**
@@ -490,8 +474,8 @@ function onAuthExpired(): void {
  * aufgebaut werden — deshalb der Zwischenspeicher. Jede eigene Änderung
  * (`saveLead`, `deleteLead`, `mergeLeads`) wirft ihn weg.
  *
- * Der Fehlerfall gibt bewusst eine leere Liste zurück statt zu werfen: die
- * Ansicht soll dann leer sein, nicht abstürzen.
+ * Fehler werden weitergegeben: Die Ansicht zeigt einen Retry-Zustand und
+ * verwechselt einen Ausfall nicht mit einem tatsächlich leeren Bestand.
  *
  * Das `try` steht deshalb AUSSEN, um `merken` herum. Läge es innen, wäre die
  * leere Liste ein erfolgreiches Ergebnis und würde mitgespeichert — nach
@@ -512,11 +496,11 @@ export async function getLeads(): Promise<Lead[]> {
         throw new Error('Sitzung abgelaufen');
       }
       if (!res.ok) throw new Error('Failed to fetch leads');
-      return (await res.json()) as Lead[];
+      const rows = (await res.json()) as Lead[];
+      return rows.map((lead) => ({ ...lead, updatedAt: lead.updatedAt || lead.createdAt }));
     });
   } catch (error) {
-    console.error('Error loading leads from API:', error);
-    return [];
+    throw error instanceof Error ? error : new Error('Leads konnten nicht geladen werden.');
   }
 }
 
@@ -527,20 +511,22 @@ export async function saveLead(lead: Partial<Lead>): Promise<void> {
   try {
     if (lead.id) {
       // Update existing lead
-      await fetch(`${API_BASE_URL}${LEADS_PATH}/${lead.id}`, {
+      const res = await fetch(`${API_BASE_URL}${LEADS_PATH}/${lead.id}`, {
         credentials: 'include',
         method: 'PATCH',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(lead)
       });
+      await assertResponse(res, 'Lead konnte nicht gespeichert werden.');
     } else {
       // Create new lead
-      await fetch(`${API_BASE_URL}${LEADS_PATH}`, {
+      const res = await fetch(`${API_BASE_URL}${LEADS_PATH}/internal`, {
         credentials: 'include',
         method: 'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(lead)
       });
+      await assertResponse(res, 'Lead konnte nicht angelegt werden.');
     }
   } catch (error) {
     console.error('Error saving lead:', error);
@@ -599,11 +585,12 @@ export async function mergeLeads(primaryId: string, mergeIds: string[]): Promise
 export async function deleteLead(id: string): Promise<void> {
   vergessen(SCHLUESSEL.leads);
   try {
-    await fetch(`${API_BASE_URL}${LEADS_PATH}/${id}`, {
+    const res = await fetch(`${API_BASE_URL}${LEADS_PATH}/${id}`, {
       credentials: 'include',
       method: 'DELETE',
       headers: authHeaders(),
     });
+    await assertResponse(res, 'Lead konnte nicht gelöscht werden.');
   } catch (error) {
     console.error('Error deleting lead:', error);
     throw error;
@@ -701,13 +688,9 @@ export interface ActivityInput {
 }
 
 export async function getActivities(leadId: string): Promise<Activity[]> {
-  try {
-    const res = await fetch(`${API_BASE_URL}${LEADS_PATH}/${leadId}/activities`, { credentials: 'include', headers: authHeaders() });
-    if (!res.ok) return [];
-    return await res.json();
-  } catch {
-    return [];
-  }
+  const res = await fetch(`${API_BASE_URL}${LEADS_PATH}/${leadId}/activities`, { credentials: 'include', headers: authHeaders() });
+  await assertResponse(res, 'Aktivitäten konnten nicht geladen werden.');
+  return await res.json();
 }
 
 export async function createActivity(leadId: string, input: ActivityInput): Promise<Activity> {
@@ -786,8 +769,11 @@ export function getSettings(): Settings {
  * dann die Meldung.
  */
 export async function saveSettings(settings: Settings): Promise<{ ok: boolean; grund?: string }> {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  return pushSettingsToServer(settings);
+  const result = await pushSettingsToServer(settings);
+  if (result.ok) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* Server remains authoritative. */ }
+  }
+  return result;
 }
 
 const SETTINGS_PATH = '/api/crm/settings';
@@ -893,7 +879,8 @@ export async function deleteLeadList(id: string): Promise<void> {
   // Die Zugehoerigkeit steht auch an jedem Lead — beide wegwerfen.
   vergessen(SCHLUESSEL.leadListen);
   vergessen(SCHLUESSEL.leads);
-  await fetch(`${API_BASE_URL}${LEAD_LISTS_PATH}/${id}`, { credentials: 'include', method: 'DELETE', headers: authHeaders() });
+  const res = await fetch(`${API_BASE_URL}${LEAD_LISTS_PATH}/${id}`, { credentials: 'include', method: 'DELETE', headers: authHeaders() });
+  await assertResponse(res, 'Liste konnte nicht gelöscht werden.');
 }
 
 export async function addLeadsToList(listId: string, leadIds: string[]): Promise<void> {
@@ -909,12 +896,13 @@ export async function addLeadsToList(listId: string, leadIds: string[]): Promise
 
 export async function removeLeadsFromList(listId: string, leadIds: string[]): Promise<void> {
   vergessen(SCHLUESSEL.leads);
-  await fetch(`${API_BASE_URL}${LEAD_LISTS_PATH}/${listId}/members`, {
+  const res = await fetch(`${API_BASE_URL}${LEAD_LISTS_PATH}/${listId}/members`, {
     credentials: 'include',
     method: 'DELETE',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ leadIds }),
   });
+  await assertResponse(res, 'Leads konnten nicht aus der Liste entfernt werden.');
 }
 
 /** Umkreissuche-Vorschau: liefert Treffer zur Auswahl (ohne Import). */
@@ -1141,13 +1129,14 @@ export interface AppointmentMutation {
   };
 }
 
-export async function getAppointments(params: { from?: string; to?: string; assigneeId?: string; companyId?: string } = {}): Promise<Appointment[]> {
+export async function getAppointments(params: { from?: string; to?: string; assigneeId?: string; companyId?: string } = {}, fresh = false): Promise<Appointment[]> {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => { if (v) qs.set(k, String(v)); });
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
   // Der Zeitraum gehoert in den Schluessel: Januar und Februar sind zwei
   // verschiedene Antworten. Ohne ihn bekaeme das Blaettern im Kalender
   // stillschweigend immer denselben Monat zurueck.
+  if (fresh) vergessen(SCHLUESSEL.termine(suffix));
   return merken(SCHLUESSEL.termine(suffix), async () => {
     const res = await fetch(`${API_BASE_URL}${APPT_PATH}${suffix}`, { credentials: 'include', headers: authHeaders() });
     if (res.status === 401 || res.status === 403) { onAuthExpired(); throw new Error('Sitzung abgelaufen'); }

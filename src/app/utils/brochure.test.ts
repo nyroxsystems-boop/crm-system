@@ -111,14 +111,16 @@ describe('Broschüren-Mail', () => {
         expect(mail.text).toContain('alles\nin einer App');
     });
 
-    it('fordert beim Versand den zentral hinterlegten PDF-Anhang an', async () => {
+    it('delegiert Empfänger und freigegebene PDF-Auswahl an den CRM-Endpunkt', async () => {
         const fetchMock = vi.fn()
             .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, messageId: 'm1' }) });
         globalThis.fetch = fetchMock as unknown as typeof fetch;
 
         await sendBrochure(lead({ email: 'kunde@betrieb.de' }));
         const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
-        expect(body.documentSlugs).toEqual(['broschuere']);
+        expect(fetchMock.mock.calls[0][0]).toContain('/api/crm/leads/l1/brochure');
+        expect(Object.keys(body)).toEqual(['requestId']);
+        expect(body.requestId).toMatch(/^[a-f0-9-]{36}$/);
     });
 
     it('wählt für Frankreich eine französische Mail und PDF', async () => {
@@ -135,8 +137,7 @@ describe('Broschüren-Mail', () => {
         globalThis.fetch = fetchMock as unknown as typeof fetch;
         await sendBrochure(lead({ country: 'FR', email: 'client@exemple.fr' }));
         const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
-        expect(body.documentSlugs).toEqual(['broschuere-fr']);
-        expect(body.subject).toContain('une demande');
+        expect(Object.keys(body)).toEqual(['requestId']);
     });
 
     it.each(['DE', 'AT', 'CH', 'Deutschland', 'Österreich', 'Schweiz'])(
@@ -145,4 +146,14 @@ describe('Broschüren-Mail', () => {
             locale: 'de', slug: 'broschuere',
         }),
     );
+    it('verwendet nach unklarem Versand dieselbe Anfrage und sendet keine frei gewählten Inhalte', async () => {
+        const fetchMock = vi.fn().mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, messageId: 'm-retry', recipient: 'kunde@example.de' }) });
+        globalThis.fetch = fetchMock as unknown as typeof fetch;
+        const item = lead({ id: 'retry', email: 'kunde@example.de' });
+        await expect(sendBrochure(item)).rejects.toThrow('Versandstatus unklar');
+        await expect(sendBrochure(item)).resolves.toMatchObject({ messageId: 'm-retry' });
+        const first = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+        const second = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body));
+        expect(first).toEqual(second);
+    });
 });

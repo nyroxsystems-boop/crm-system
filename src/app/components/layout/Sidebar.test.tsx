@@ -46,6 +46,7 @@ function istOffen(): boolean {
 
 beforeEach(() => {
     localStorage.clear();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => [] }));
 });
 
 afterEach(() => {
@@ -55,16 +56,17 @@ afterEach(() => {
     cleanup();
     localStorage.clear();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
 });
 
 describe('ohne Anheftung', () => {
-    it('klappt nach der Navigation ein', async () => {
+    it('behält die gewählte Breite nach der Navigation bei', async () => {
         const nutzer = userEvent.setup();
         aufbauen();
         expect(istOffen()).toBe(true);
 
         await nutzer.click(screen.getAllByText('Leads')[0]);
-        expect(istOffen()).toBe(false);
+        expect(istOffen()).toBe(true);
     });
 });
 

@@ -1,3 +1,4 @@
+import { safeWebsiteUrl } from '../utils/safeUrl';
 import { useState, useEffect } from 'react';
 import { Globe, Search, Radar, MapPin, Check, X, Phone, ExternalLink, Loader2, Download, ListChecks, GitMerge, AlertTriangle, Map } from 'lucide-react';
 import { toast } from 'sonner';
@@ -7,7 +8,7 @@ import {
   type ScrapedCandidate, type LeadList, type ImportConflict, type DuplicateAction, type ScraperJobStatus,
 } from '../utils/storage';
 import { CustomSelect } from './CustomSelect';
-import { Badge, Button, Card, EmptyState, Modal, PageHeader, SEITEN_RAND, SectionLabel, cn, inputClass, scoreTone } from './ui-kit';
+import { Badge, Button, Card, EmptyState, Modal, PageHeader, SEITEN_RAND, SectionLabel, cn, inputClass } from './ui-kit';
 
 // Branchen 1:1 zur Scraper-Backend-Logik (overpass.ts selectorsForNiche).
 const NICHES = ['Neuteilehändler', 'Gebrauchtteilehändler'];
@@ -274,13 +275,12 @@ export function ScraperView() {
                       <th className="label-technical px-4 py-3 text-left text-text-muted">Telefon</th>
                       <th className="label-technical px-4 py-3 text-left text-text-muted">Website</th>
                       <th className="label-technical px-4 py-3 text-left text-text-muted">Adresse</th>
-                      <th className="label-technical px-4 py-3 text-center text-text-muted">Score</th>
+                      <th className="label-technical px-4 py-3 text-center text-text-muted">Erfasste Kontaktdaten</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border-subtle">
                     {candidates.map((c) => {
                       const isSel = selected.has(c.externalRef);
-                      const stn = scoreTone(c.leadScore);
                       return (
                         <tr key={c.externalRef} onClick={() => toggleOne(c.externalRef)}
                           className={cn('cursor-pointer transition-colors hover:bg-elevated', isSel && 'bg-accent-500/5')}>
@@ -296,14 +296,14 @@ export function ScraperView() {
                           </td>
                           <td className="px-4 py-3">
                             {c.website ? (
-                              <a href={c.website} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                              <a href={safeWebsiteUrl(c.website)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
                                 className="inline-flex items-center gap-1 text-accent-500 hover:underline">
                                 {c.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}<ExternalLink className="size-3" />
                               </a>
                             ) : <span className="text-text-muted">—</span>}
                           </td>
                           <td className="px-4 py-3 text-text-secondary">{c.address || <span className="text-text-muted">—</span>}</td>
-                          <td className="px-4 py-3 text-center"><Badge tone={stn.tone}>{c.leadScore ?? 0}</Badge></td>
+                          <td className="px-4 py-3 text-center"><span className="text-sm text-text-secondary">{[c.phone && "Telefon", c.email && "E-Mail", c.website && "Website"].filter(Boolean).join(" · ") || "Kontakt fehlt"}<span className="mt-1 block text-xs text-text-muted">Noch nicht verifiziert</span></span></td>
                         </tr>
                       );
                     })}
@@ -395,7 +395,7 @@ export function ScraperView() {
                   {urlResult.phone && <div className="text-sm text-text-secondary">{urlResult.phone}</div>}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge tone={scoreTone(urlResult.leadScore).tone}>{urlResult.leadScore ?? 0}/100</Badge>
+                  <Badge tone="neutral">{urlResult.phone || urlResult.email ? "Kontaktweg erfasst" : "Kontakt fehlt"}</Badge>
                   <Button size="sm" onClick={async () => {
                     try { const r = await importScraped([urlResult], listIdForName(targetList)); toast.success(`${r.imported} importiert.`); setUrlResult(null); }
                     catch (e: any) { toast.error(e.message || 'Import fehlgeschlagen'); }

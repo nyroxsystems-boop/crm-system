@@ -39,8 +39,7 @@ export async function einstellungenSichern(neu: Settings, erfolg: string): Promi
         return true;
     }
     toast.error(`Nicht gespeichert: ${ergebnis.grund ?? 'unbekannter Grund'}`, {
-        description: 'Die Änderung steht nur in diesem Browser und geht beim '
-            + 'nächsten Laden verloren.',
+        description: 'Der bisher gespeicherte Stand bleibt gültig. Bitte erneut versuchen.',
         duration: 8000,
     });
     return false;

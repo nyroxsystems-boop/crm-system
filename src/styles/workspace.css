@@ -1,0 +1,97 @@
+/* Partsunion internal workspace. CRM remains a separate sales application. */
+:root, [data-theme="light"] {
+  --bg-canvas: #f6f7f9;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f1f3f6;
+  --bg-elevated-hover: #e8ecf2;
+  --border: #dfe3e8;
+  --border-strong: #bbc4d0;
+  --text-primary: #17212f;
+  --text-secondary: #465568;
+  --text-tertiary: #526175;
+  --text-muted: #5d6b7d;
+  --text-faint: #758296;
+  --accent-500: #2458d3;
+  --accent-600: #2458d3;
+  --accent-700: #1d46aa;
+  --accent-400: #3268df;
+  --accent-glow: rgb(36 88 211 / 0.14);
+  --overlay: 23 33 47;
+  --auf-ton: #ffffff;
+  --background: 220 20% 97%;
+  --foreground: 216 34% 14%;
+  --card: 0 0% 100%;
+  --card-foreground: 216 34% 14%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 216 34% 14%;
+  --muted: 216 22% 95%;
+  --muted-foreground: 215 15% 40%;
+  --input: 215 20% 80%;
+}
+[data-theme="dark"] {
+  --bg-canvas: #111722;
+  --bg-surface: #18212e;
+  --bg-elevated: #202c3c;
+  --bg-elevated-hover: #2a384b;
+  --border: #334155;
+  --border-strong: #52637b;
+  --text-primary: #edf2f8;
+  --text-secondary: #c1ccdb;
+  --text-tertiary: #b0bdce;
+  --text-muted: #a0afc3;
+  --text-faint: #8293a9;
+  --accent-500: #88b0ff;
+  --accent-600: #2458d3;
+  --accent-700: #1d46aa;
+  --overlay: 255 255 255;
+  --auf-ton: #111722;
+}
+:root, [data-theme] {
+  --font-display: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --radius: 8px;
+  --karte-von: var(--bg-surface);
+  --karte-bis: var(--bg-surface);
+  --karte-rand: var(--border);
+  --karte-rand-hover: var(--border-strong);
+  --karte-schatten: none;
+  --hero-verlauf: var(--bg-surface);
+  --hero-schein: transparent;
+  --hero-rand: var(--border);
+  --shadow-card: none;
+  --shadow-card-hover: 0 1px 3px rgb(23 33 47 / 0.05);
+  --shadow-modal: 0 18px 50px rgb(23 33 47 / 0.18);
+}
+[hidden] { display: none !important; }
+body { background: var(--bg-canvas); font-family: var(--font-body); font-size: 14px; }
+main h1 { font-size: 22px !important; line-height: 1.3 !important; letter-spacing: -0.02em !important; }
+main h2 { letter-spacing: normal; }
+main .label-technical, main [class*="tracking-[0."], main .uppercase { text-transform: none !important; letter-spacing: normal !important; font-family: var(--font-body) !important; }
+main .rounded-xl { border-radius: 8px; }
+main table th { font-size: 13px; font-weight: 500; }
+main table td { font-size: 14px; }
+main fieldset { min-width: 0; }
+@media (max-width: 1535px) {
+  .crm-lead-table[data-compact="false"] :is(th, td):is(:nth-child(3), :nth-child(7), :nth-child(9)) { display: none; }
+}
+.karte, .karte-klein { border-radius: 8px; background: var(--bg-surface); box-shadow: none; }
+.label-technical { font-family: var(--font-body); text-transform: none; letter-spacing: normal; font-size: 13px; font-weight: 600; }
+.einblenden > *, .ansicht-herein { animation: none; }
+.hover-lift:hover { transform: none; }
+aside[aria-label^="Hauptnavigation"], header[role="banner"] { background: var(--bg-surface); backdrop-filter: none; }
+aside nav button { font-size: 14px; border-radius: 6px; font-weight: 500; }
+aside nav button[aria-current="page"] { color: var(--accent-500); }
+header[role="banner"] button, header[role="banner"] a { border-radius: 6px; font-size: 13px; box-shadow: none; }
+header[role="banner"] button[class*="from-accent"] { background: var(--accent-600); }
+button[class*="bg-gradient"] { background-image: none; }
+header[role="banner"] button:hover { box-shadow: none; }
+.crm-metric { border-left: 1px solid var(--border); padding: 0 24px; }
+.crm-metric:first-child { border-left: 0; padding-left: 0; }
+.crm-work-row { display: grid; grid-template-columns: minmax(180px, 1.5fr) minmax(120px, 1fr) auto; align-items: center; gap: 16px; padding: 16px 20px; width: 100%; text-align: left; border-top: 1px solid var(--border); }
+.crm-work-row:hover { background: var(--bg-elevated); }
+input, select { min-height: 36px; }
+input[type="checkbox"], input[type="radio"] { min-height: auto; }
+[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
+[data-theme="light"] input[type="time"]::-webkit-calendar-picker-indicator { filter: none; }
+@media (max-width: 640px) { .crm-work-row { grid-template-columns: 1fr auto; } .crm-work-row > :nth-child(2) { display: none; } .crm-metric { padding: 0 12px; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }

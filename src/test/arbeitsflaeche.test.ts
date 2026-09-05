@@ -99,8 +99,8 @@ describe('Aufbau der Arbeitsfläche', () => {
         // Die Kennzahlen dagegen scrollen mit: fest im Kopf kosten sie rund
         // 80 px, die auf einem 13-Zoll-Bildschirm der Arbeitsflaeche fehlen.
         expect(kopf, 'die Kennzahlen stehen wieder fest im Kopf').not.toContain('<StatCard');
-        expect(LEADS.slice(LEADS.indexOf('cn(ARBEITSFLAECHE')), 'die Kennzahlen fehlen ganz')
-            .toContain('<StatCard');
+        expect(LEADS, 'die Leadliste soll keine dekorativen Kennzahlkarten mehr haben').not.toContain('<StatCard');
+        expect(LEADS.slice(LEADS.indexOf('cn(ARBEITSFLAECHE')), 'die Ergebnisanzahl fehlt').toContain('von ${leads.length} Leads');
     });
 
     it('der Seitenkopf zerdrueckt seinen Titel nicht', () => {
@@ -123,7 +123,8 @@ describe('Aufbau der Arbeitsfläche', () => {
     it('die Huelle gibt eine feste Hoehe vor, an der h-full haengen kann', () => {
         // `h-full` ist height:100% und braucht einen Elternteil mit
         // bestimmter Hoehe. Ohne h-screen aussen faellt alles in sich zusammen.
-        expect(APP).toContain('h-screen');
+        expect(APP).toContain('className={WORKSPACE_FRAME}');
+        expect(readFileSync('src/app/components/layout/workspaceShell.ts', 'utf8')).toContain('h-screen h-dvh');
         expect(APP, 'der Bereich um die Ansicht traegt h-full nicht')
             .toMatch(/ansicht-herein h-full/);
     });
@@ -148,8 +149,11 @@ describe('Aufbau der Arbeitsfläche', () => {
         // hoechste Bauteil darin (h-9, 36 px) sind genau 64. Waechst der
         // Inhalt, schneidet h-16 ihn ab — und die Arbeitsflaeche darunter
         // bekaeme unbemerkt weniger Platz.
-        expect(TOPBAR).toMatch(/\bh-16\b/);
-        const t = TOPBAR.match(/py-([\d.]+)/);
+        expect(TOPBAR).toContain("className={cn(WORKSPACE_HEADER,");
+        const shell = readFileSync('src/app/components/layout/workspaceShell.ts', 'utf8');
+        const header = shell.match(/WORKSPACE_HEADER = '([^']+)'/)?.[1] ?? '';
+        expect(header).toMatch(/\bh-16\b/);
+        const t = header.match(/py-([\d.]+)/);
         const innen = t ? Number(t[1]) * 4 * 2 : 0;
         expect(innen + 36).toBeLessThanOrEqual(64);
     });

@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { defaultOpenStage } from '../utils/stages';
 import { X, Plus } from 'lucide-react';
 import { type Lead, getSettings, getStatusOptions, getAppointmentAdmins } from '../utils/storage';
 import { CustomSelect } from './CustomSelect';
 import { Modal, Button, Field, Badge, inputClass, cn } from './ui-kit';
+import { useWorkspaceGuard } from '../utils/useWorkspaceGuard';
 
 interface LeadModalProps {
   lead: Lead | null;
   onClose: () => void;
-  onSave: (lead: Partial<Lead>) => void;
+  onSave: (lead: Partial<Lead>) => Promise<void> | void;
   /** Wenn gesetzt: Zurück-Pfeil oben links (zurück zur Aktivitäten-Ansicht). */
   onBack?: () => void;
 }
@@ -23,10 +25,10 @@ export function LeadModal({ lead, onClose, onSave, onBack }: LeadModalProps) {
     industry: lead?.industry || '',
     city: lead?.city || '',
     country: lead?.country || 'DE',
-    dealerType: lead?.dealerType || 'neuteile',
+    dealerType: lead?.dealerType,
     address: lead?.address || '',
-    status: lead?.status || 'Neu',
-    source: lead?.source || 'Website',
+    status: lead?.status || defaultOpenStage(),
+    source: lead?.source || 'Manuell',
     value: lead?.value || 0,
     priority: lead?.priority || 'Mittel',
     assignedTo: lead?.assignedTo || '',
@@ -36,6 +38,14 @@ export function LeadModal({ lead, onClose, onSave, onBack }: LeadModalProps) {
     nextFollowUpDate: lead?.nextFollowUpDate || '',
   });
   const [newTag, setNewTag] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const saveErrorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (saveError) { saveErrorRef.current?.focus(); saveErrorRef.current?.scrollIntoView?.({ block: 'nearest' }); } }, [saveError]);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [dirty, setDirty] = useState(false);
+  useWorkspaceGuard(dirty, saving);
+  const close = () => { if (!saving && (!dirty || window.confirm('Ungespeicherte Änderungen verwerfen?'))) onClose(); };
   // Echte Admin-Accounts für die Zuteilung (statt Freitext — Tippfehler machten
   // Leads im Benutzer-Filter unauffindbar). Ein evtl. Alt-Wert bleibt wählbar.
   const NO_ASSIGNEE = '— nicht zugewiesen —';
@@ -49,12 +59,25 @@ export function LeadModal({ lead, onClose, onSave, onBack }: LeadModalProps) {
     ...(formData.assignedTo && !adminNames.includes(formData.assignedTo) ? [formData.assignedTo] : []),
   ];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ ...lead, ...formData });
+    if (saving) return;
+    const errors: Record<string, string> = {};
+    if (!formData.company.trim()) errors.company = 'Bitte den Firmennamen eintragen.';
+    if (formData.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) errors.email = 'Bitte eine gültige E-Mail-Adresse eintragen.';
+    if (formData.value < 0 || !Number.isFinite(formData.value)) errors.value = 'Der geschätzte Wert muss mindestens 0 sein.';
+    setFieldErrors(errors); setSaveError('');
+    if (Object.keys(errors).length) {
+      requestAnimationFrame(() => document.querySelector<HTMLElement>('#lead-form [aria-invalid="true"]')?.focus());
+      return;
+    }
+    setSaving(true);
+    try { await onSave({ ...lead, ...formData, company: formData.company.trim(), email: formData.email.trim() }); setDirty(false); }
+    catch (error) { setSaveError(error instanceof Error ? error.message : 'Speichern fehlgeschlagen. Deine Eingaben bleiben erhalten.'); }
+    finally { setSaving(false); }
   };
 
-  const handleChange = (field: string, value: unknown) => setFormData((prev) => ({ ...prev, [field]: value }));
+  const handleChange = (field: string, value: unknown) => { setDirty(true); setFormData((prev) => ({ ...prev, [field]: value })); setFieldErrors((prev) => ({ ...prev, [field]: '' })); };
 
   const addTag = () => {
     const t = newTag.trim();
@@ -68,30 +91,35 @@ export function LeadModal({ lead, onClose, onSave, onBack }: LeadModalProps) {
 
   return (
     <Modal
-      onClose={onClose}
-      onBack={onBack}
+      onClose={close}
+      onBack={onBack ? () => { if (!saving && (!dirty || window.confirm('Ungespeicherte Änderungen verwerfen?'))) onBack(); } : undefined}
       title={lead ? 'Lead bearbeiten' : 'Neuer Lead'}
       subtitle={onBack ? 'Stammdaten — zurück zu den Aktivitäten oben links.' : 'Geben Sie die Lead-Details ein.'}
       size="lg"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={close} disabled={saving}>
             Abbrechen
           </Button>
-          <Button type="submit" form="lead-form">
-            {lead ? 'Aktualisieren' : 'Lead erstellen'}
+          <Button type="submit" form="lead-form" disabled={saving}>
+            {saving ? 'Wird gespeichert…' : lead ? 'Änderungen speichern' : 'Lead erstellen'}
           </Button>
         </>
       }
     >
-      <form id="lead-form" onSubmit={handleSubmit} className="space-y-6">
+      <form id="lead-form" noValidate onSubmit={handleSubmit} className="space-y-6" aria-busy={saving}>
+        {saveError && <p ref={saveErrorRef} tabIndex={-1} role="alert" className="rounded-md border border-status-danger/30 p-3 text-sm text-status-danger">{saveError} Bitte erneut versuchen.</p>}
+        <fieldset disabled={saving} className="space-y-6">
+        <p className="text-sm text-text-secondary">Beginne mit Firma und Kontakt. Weitere Stammdaten kannst du später ergänzen.</p>
         {/* Basis */}
         <section className="space-y-4">
           <h4 className="label-technical text-text-muted">Basisinformationen</h4>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field label="Firma / Händler">
+            <Field label="Firma / Händler" required>
+              {fieldErrors.company && <p id="company-error" role="alert" className="text-sm text-status-danger">{fieldErrors.company}</p>}
               <input
                 type="text"
+                required aria-invalid={Boolean(fieldErrors.company)} aria-describedby={fieldErrors.company ? "company-error" : undefined}
                 value={formData.company}
                 onChange={(e) => handleChange('company', e.target.value)}
                 placeholder="z.B. Müller Autoteile GmbH"
@@ -108,8 +136,10 @@ export function LeadModal({ lead, onClose, onSave, onBack }: LeadModalProps) {
               />
             </Field>
             <Field label="E-Mail">
+              {fieldErrors.email && <p id="email-error" role="alert" className="text-sm text-status-danger">{fieldErrors.email}</p>}
               <input
                 type="email"
+                aria-invalid={Boolean(fieldErrors.email)} aria-describedby={fieldErrors.email ? "email-error" : undefined}
                 value={formData.email}
                 onChange={(e) => handleChange('email', e.target.value)}
                 placeholder="max@beispiel.de"
@@ -144,9 +174,9 @@ export function LeadModal({ lead, onClose, onSave, onBack }: LeadModalProps) {
             </Field>
             <Field label="Händlerart">
               <CustomSelect
-                value={formData.dealerType === 'gebrauchtteile' ? 'Gebrauchtteilehändler' : 'Neuteilehändler'}
-                onChange={(value) => handleChange('dealerType', value === 'Gebrauchtteilehändler' ? 'gebrauchtteile' : 'neuteile')}
-                options={['Neuteilehändler', 'Gebrauchtteilehändler']}
+                value={formData.dealerType ? ({ neuteile: 'Neuteilehändler', gebrauchtteile: 'Gebrauchtteilehändler', verwerter: 'Verwerter', werkstatt: 'Werkstatt', mischbetrieb: 'Mischbetrieb' })[formData.dealerType] : 'Noch einordnen'}
+                onChange={(value) => handleChange('dealerType', ({ Neuteilehändler: 'neuteile', Gebrauchtteilehändler: 'gebrauchtteile', Verwerter: 'verwerter', Werkstatt: 'werkstatt', Mischbetrieb: 'mischbetrieb' } as Record<string, string>)[value])}
+                options={['Noch einordnen', 'Neuteilehändler', 'Gebrauchtteilehändler', 'Verwerter', 'Werkstatt', 'Mischbetrieb']}
               />
             </Field>
           </div>
@@ -195,6 +225,7 @@ export function LeadModal({ lead, onClose, onSave, onBack }: LeadModalProps) {
               <CustomSelect value={formData.source} onChange={(v) => handleChange('source', v)} options={settings.sources} />
             </Field>
             <Field label="Geschätzter Wert (€)">
+              {fieldErrors.value && <p role="alert" className="text-sm text-status-danger">{fieldErrors.value}</p>}
               <input
                 type="number"
                 min="0"
@@ -222,17 +253,7 @@ export function LeadModal({ lead, onClose, onSave, onBack }: LeadModalProps) {
                 className={cn(inputClass, 'h-9')}
               />
             </Field>
-            <Field label="Lead Score (0–100)">
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={formData.leadScore}
-                onChange={(e) => handleChange('leadScore', Number(e.target.value))}
-                placeholder="0"
-                className={cn(inputClass, 'h-9')}
-              />
-            </Field>
+            <p className="self-end text-sm text-text-muted">Die Datenqualität ergibt sich aus den erfassten Basisdaten. Priorität und nächster Schritt werden separat gepflegt.</p>
           </div>
         </section>
 
@@ -277,6 +298,7 @@ export function LeadModal({ lead, onClose, onSave, onBack }: LeadModalProps) {
             className={cn(inputClass, 'resize-none py-2')}
           />
         </section>
+        </fieldset>
       </form>
     </Modal>
   );

@@ -12,7 +12,7 @@
 # -> index.html) und ist ausserdem das, was das Admin-Dashboard schon nutzt.
 # Nebenbei faellt `serve` als Laufzeit-Abhaengigkeit weg.
 # ============================================================================
-FROM node:22-alpine AS builder
+FROM node:22.23.2-alpine AS builder
 
 ARG VITE_API_BASE_URL=https://api.partsunion.de
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}

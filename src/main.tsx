@@ -21,6 +21,7 @@ import { ChunkErrorBoundary } from './app/components/ChunkErrorBoundary'
 import '@fontsource-variable/space-grotesk'
 import '@fontsource-variable/manrope'
 import '@fontsource-variable/jetbrains-mono'
+import '@fontsource-variable/inter'
 import './styles/index.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

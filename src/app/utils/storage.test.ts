@@ -15,7 +15,7 @@
  *
  * Dieselbe Fehlerklasse steckte im Admin-Dashboard in impersonationSession.ts.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getCurrentUser, getToken, logout } from './storage';
 
@@ -33,12 +33,14 @@ const echt = {
     localStorage: Object.getOwnPropertyDescriptor(globalThis, 'localStorage'),
     sessionStorage: Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage'),
 };
+beforeEach(() => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true })); });
 
 afterEach(() => {
     for (const [name, d] of Object.entries(echt)) {
         if (d) Object.defineProperty(globalThis, name, d);
     }
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
 });
 
 describe('bei gesperrtem Speicher', () => {

@@ -58,6 +58,7 @@ const LEADS = Array.from({ length: 42 }, (_, i) => ({
 
 vi.mock('../app/utils/storage', () => ({
     getLeads: () => Promise.resolve(LEADS),
+    getSettings: () => ({ pipelineStages: ['Neu', 'Kontaktiert', 'Qualifiziert', 'Gewonnen', 'Verloren'].map((name, index) => ({ id: String(index), name, isActive: true, order: index, category: name === 'Gewonnen' ? 'won' : name === 'Verloren' ? 'lost' : 'open' })) }),
     getCurrentUser: () => ({ username: 'aaron', name: 'Aaron Vogt', role: 'Admin' }),
     getAppointments: () => Promise.resolve([]),
     // Form wie die echte Funktion: AppointmentAdmin[] mit `username`, nicht
@@ -172,10 +173,11 @@ describe('Bildprobe CRM-Redesign', () => {
         writeFileSync(join(AUSGABE, 'huelle.html'), seite('Probe — CRM', css!, markup), 'utf8');
 
         // Die Merkmale des Redesigns stehen wirklich im Markup.
-        expect(markup).toContain('SALES CRM');
+        expect(markup).toContain('Vertrieb');
         expect(markup).toContain('w-64');
-        expect(markup).toContain('tracking-[0.2em]');
-        expect(markup).toContain('backdrop-blur-[18px]');
+        expect(markup).toContain('Arbeitsübersicht');
+        expect(markup).toContain('bg-surface');
+        expect(markup).not.toContain('backdrop-blur-[18px]');
         expect(markup).toContain('Neuer Lead');
         // Der Umschalter ist weg — der Entwurf hat keinen.
         expect(markup).not.toContain('Zu hellem Design');
@@ -198,7 +200,8 @@ describe('Bildprobe CRM-Redesign', () => {
     it.skipIf(!css)('schreibt das Dashboard nach dist-probe/', async () => {
         const { container } = render(<Dashboard />);
         await waitFor(() => {
-            expect(container.querySelector('h1')?.textContent ?? '').toMatch(/\d+ Leads/);
+            expect(container.querySelector('h1')?.textContent ?? '').toBe('Arbeitsübersicht');
+            expect(container.textContent).toContain('Nächste Schritte');
         });
 
         const markup =
@@ -231,15 +234,18 @@ describe('Bildprobe CRM-Redesign', () => {
 
         const text = container.textContent ?? '';
         // Die Sätze richten sich nach den Zahlen, statt fest zu stehen.
-        expect(text).toMatch(/42 Leads/);
-        expect(text).toMatch(/warte[nt] auf dich|Alles abgearbeitet/);
+        expect(text).toContain('Wiedervorlagen fällig');
+        expect(text).toContain('Ohne nächsten Schritt');
         // Und die Abschnitte des Entwurfs sind da.
-        for (const abschnitt of ['Pipeline-Verteilung', 'Team-Verteilung', 'Leads nach Quelle', 'Neueste Leads']) {
+        for (const abschnitt of ['Pipeline-Bestand', 'Termine heute', 'Datenqualität', 'Nächste Schritte']) {
             expect(text, `Abschnitt "${abschnitt}" fehlt`).toContain(abschnitt);
         }
     });
 
     it.skipIf(!css)('enthält für jede benutzte Klasse eine Regel in der CSS', () => {
+        // A prefix match against .border-border-subtle must not hide a missing
+        // .border-border utility (which otherwise falls back to text color).
+        expect(css).toMatch(/\.border-border\s*\{\s*border-color:\s*var\(--border\)/);
         const markup = renderToStaticMarkup(
             <div>
                 <Sidebar activeView="leads" onNavigate={() => {}} mobileOpen={false} onMobileOpenChange={() => {}} />

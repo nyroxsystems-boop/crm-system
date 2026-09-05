@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, ChevronUp, ChevronDown, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { einstellungenSichern } from '../utils/einstellungenSichern';
-import { getSettings, type PipelineStage } from '../utils/storage';
+import { stageCategory, type StageCategory } from '../utils/stages';
+import { getSettings, getLeads, type PipelineStage } from '../utils/storage';
 import {
   Card, PageHeader, StatCard, Button, IconButton, Badge, Field, Modal, inputClass, cn, SEITEN_RAND,
 } from './ui-kit';
@@ -34,7 +35,7 @@ export function PipelineSettings() {
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStage, setEditingStage] = useState<PipelineStage | null>(null);
-  const [formData, setFormData] = useState({ name: '', color: 'blue', probability: 50, isActive: true });
+  const [formData, setFormData] = useState({ name: '', color: 'blue', probability: 50, isActive: true, category: 'open' as StageCategory });
 
   useEffect(() => {
     loadStages();
@@ -47,20 +48,26 @@ export function PipelineSettings() {
   const handleOpenModal = (stage?: PipelineStage) => {
     if (stage) {
       setEditingStage(stage);
-      setFormData({ name: stage.name, color: stage.color, probability: stage.probability, isActive: stage.isActive });
+      setFormData({ name: stage.name, color: stage.color, probability: stage.probability, isActive: stage.isActive, category: stageCategory(stage) });
     } else {
       setEditingStage(null);
-      setFormData({ name: '', color: 'blue', probability: 50, isActive: true });
+      setFormData({ name: '', color: 'blue', probability: 50, isActive: true, category: 'open' });
     }
     setIsModalOpen(true);
   };
 
+  const safeAction = async (action: () => Promise<void>) => { try { await action(); } catch (error) { toast.error(error instanceof Error ? error.message : 'Aktion fehlgeschlagen. Bitte erneut versuchen.'); } };
   const handleSave = async () => {
     if (!formData.name.trim()) {
       toast.error('Bitte geben Sie einen Namen ein.');
       return;
     }
     const settings = getSettings();
+    if (settings.pipelineStages.some((stage) => stage.id !== editingStage?.id && stage.name.toLowerCase() === formData.name.trim().toLowerCase())) { toast.error('Eine Phase mit diesem Namen existiert bereits.'); return; }
+    if (editingStage && !formData.isActive) {
+      const assigned = (await getLeads()).filter((lead) => lead.status === editingStage.name);
+      if (assigned.length) { toast.error(`${assigned.length} Leads verwenden diese Phase. Verschiebe sie zuerst, bevor du sie deaktivierst.`); return; }
+    }
     let naechste: PipelineStage[];
     if (editingStage) {
       naechste = settings.pipelineStages.map((s) => (s.id === editingStage.id ? { ...s, ...formData } : s));
@@ -68,6 +75,7 @@ export function PipelineSettings() {
       naechste = [...settings.pipelineStages, {
         id: crypto.randomUUID(),
         name: formData.name,
+        category: formData.category,
         color: formData.color,
         probability: formData.probability,
         order: settings.pipelineStages.length + 1,
@@ -76,15 +84,16 @@ export function PipelineSettings() {
     }
     // Erst speichern, dann melden — vorher stand die Erfolgsmeldung fest,
     // egal was der Server antwortete.
-    await einstellungenSichern(
+    const saved = await einstellungenSichern(
       { ...settings, pipelineStages: naechste },
       editingStage ? 'Stage aktualisiert.' : `Stage „${formData.name}" angelegt.`,
     );
-    loadStages();
-    setIsModalOpen(false);
+    if (saved) { loadStages(); setIsModalOpen(false); }
   };
 
-  const handleDelete = (stageId: string) => {
+  const handleDelete = async (stageId: string) => {
+    const stage = stages.find((item) => item.id === stageId);
+    if ((await getLeads()).some((lead) => lead.status === stage?.name)) { toast.error('Diese Phase enthält Leads. Verschiebe sie vor dem Löschen.'); return; }
     if (confirm('Möchten Sie diese Pipeline-Stage wirklich löschen?')) {
       const settings = getSettings();
       void einstellungenSichern(
@@ -94,8 +103,10 @@ export function PipelineSettings() {
     }
   };
 
-  const handleToggleActive = (stageId: string) => {
+  const handleToggleActive = async (stageId: string) => {
     const settings = getSettings();
+    const stage = settings.pipelineStages.find((item) => item.id === stageId);
+    if (stage?.isActive && (await getLeads()).some((lead) => lead.status === stage.name)) { toast.error('Diese Phase enthält Leads und kann nicht deaktiviert werden.'); return; }
     const updated = settings.pipelineStages.map((s) => (s.id === stageId ? { ...s, isActive: !s.isActive } : s));
     void einstellungenSichern({ ...settings, pipelineStages: updated },
       'Stage umgeschaltet.').then(loadStages);
@@ -178,7 +189,7 @@ export function PipelineSettings() {
 
               <div className="min-w-0 flex-1">
                 <div className="font-medium text-text-primary">{stage.name}</div>
-                <div className="text-sm text-text-muted">Wahrscheinlichkeit: {stage.probability}%</div>
+                <div className="text-sm text-text-muted">{({ open: 'Offen', won: 'Gewonnen', lost: 'Verloren' })[stageCategory(stage)]} · {stage.probability}% Planannahme</div>
               </div>
 
               <Badge tone={stage.isActive ? 'success' : 'neutral'} dot>
@@ -188,7 +199,7 @@ export function PipelineSettings() {
               <div className="flex items-center gap-1">
                 <IconButton
                   className="size-8"
-                  onClick={() => handleToggleActive(stage.id)}
+                  onClick={() => void safeAction(() => handleToggleActive(stage.id))}
                   title={stage.isActive ? 'Deaktivieren' : 'Aktivieren'}
                 >
                   {stage.isActive ? <X className="size-4" /> : <Check className="size-4" />}
@@ -196,7 +207,7 @@ export function PipelineSettings() {
                 <IconButton className="size-8" onClick={() => handleOpenModal(stage)} aria-label="Bearbeiten">
                   <Edit className="size-4" />
                 </IconButton>
-                <IconButton className="size-8" tone="danger" onClick={() => handleDelete(stage.id)} aria-label="Löschen">
+                <IconButton className="size-8" tone="danger" onClick={() => void safeAction(() => handleDelete(stage.id))} aria-label="Löschen">
                   <Trash2 className="size-4" />
                 </IconButton>
               </div>
@@ -215,11 +226,12 @@ export function PipelineSettings() {
               <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
                 Abbrechen
               </Button>
-              <Button onClick={handleSave}>{editingStage ? 'Speichern' : 'Stage erstellen'}</Button>
+              <Button onClick={() => void safeAction(handleSave)}>{editingStage ? 'Speichern' : 'Stage erstellen'}</Button>
             </>
           }
         >
           <div className="space-y-5">
+            <Field label="Fachlicher Phasentyp" hint="Bleibt auch bei einer Umbenennung erhalten. Eine bereits verwendete Phase kann nicht umklassifiziert werden."><select className={inputClass} value={formData.category} onChange={(event) => setFormData({ ...formData, category: event.target.value as StageCategory })}><option value="open">Offen</option><option value="won">Gewonnen</option><option value="lost">Verloren</option></select></Field>
             <Field label="Stage-Name" required>
               <input
                 type="text"

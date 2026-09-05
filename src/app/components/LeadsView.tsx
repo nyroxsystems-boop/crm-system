@@ -1,31 +1,39 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  Plus, Search, Filter, Edit, Trash2, Eye, Download, Mail, Phone, Upload, Clock, Globe,
+  Plus, Search, Filter, Trash2, Download, Mail, Phone, Upload, Clock, Globe,
   ArrowUp, ArrowDown, ChevronsUpDown, Table2, Columns3, X, Check, ChevronDown, ListPlus, Layers,
   UserPlus, CalendarClock, Copy,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { sendBrochureBatch } from '../utils/brochure';
 import {
-  getLeads, saveLead, deleteLead, getStatusOptions, type Lead,
+  getLeads, saveLead, getStatusOptions, type Lead,
   getLeadLists, createLeadList, deleteLeadList, addLeadsToList, removeLeadsFromList, type LeadList,
   enrichMissingContacts, getAppointmentAdmins, type AppointmentAdmin,
 } from '../utils/storage';
+import { defaultOpenStage } from '../utils/stages';
+import { LoadError } from './LoadError';
 import { LeadModal } from './LeadModal';
+import { LeadBatchDialog, type LeadBatchOperation } from './LeadBatchDialog';
+import { LeadMobileCard } from './LeadMobileCard';
 import { LeadDetailModal } from './LeadDetailModal';
 import { ImportModal, type ImportedRow } from './ImportModal';
 import { DuplicatesModal } from './DuplicatesModal';
 import { CustomSelect } from './CustomSelect';
 import {
-  Card, PageHeader, StatCard, Button, IconButton, Badge, EmptyState, StatusSelect, PriorityPill,
-  inputClass, scoreTone, statusColor, cn,
+  Card, PageHeader, Button, IconButton, Badge, EmptyState, StatusSelect, PriorityPill,
+  inputClass, statusColor, cn,
 } from './ui-kit';
+import { matchesQuality, qualityOf, timestamp, localDayKey, type QualityFilter } from '../utils/leadQuality';
+import { getCurrentUser } from '../utils/storage';
+import { safeWebsiteUrl } from '../utils/safeUrl';
 import { ARBEITSFLAECHE, KOPF_BEREICH, SPALTE_SCROLLT, VOLLE_HOEHE } from './dichte';
 
-type SortField = 'company' | 'createdAt' | 'value' | 'updatedAt' | 'lastContact';
+type SortField = 'company' | 'createdAt' | 'value' | 'updatedAt' | 'lastContact' | 'nextFollowUpDate';
 
 /** Sortier-Schnellwahl in der Filterleiste (Label → Feld + Richtung). */
 const SORT_PRESETS: { label: string; field: SortField; dir: 'asc' | 'desc' }[] = [
+  { label: 'Nächste Wiedervorlage', field: 'nextFollowUpDate', dir: 'asc' },
   { label: 'Zuletzt aktualisiert', field: 'updatedAt', dir: 'desc' },
   { label: 'Neueste zuerst', field: 'createdAt', dir: 'desc' },
   { label: 'Lange kein Kontakt', field: 'lastContact', dir: 'asc' },
@@ -34,6 +42,10 @@ const SORT_PRESETS: { label: string; field: SortField; dir: 'asc' | 'desc' }[] =
 
 /** Letzter Protokoll-Kontakt als Timestamp; nie kontaktiert = 0 (→ „am längsten her"). */
 const lastContactTime = (l: Lead): number => (l.lastContactDate ? new Date(l.lastContactDate).getTime() || 0 : 0);
+const QUALITY_FILTERS: { value: QualityFilter; label: string }[] = [{ value: 'all', label: 'Alle Datenqualitäten' }, { value: 'complete', label: 'Basisdaten vollständig' }, { value: 'no_contact', label: 'Kontaktweg fehlt' }, { value: 'missing_person', label: 'Ansprechpartner fehlt' }, { value: 'no_next_step', label: 'Nächster Schritt fehlt' }, { value: 'stale', label: 'Seit 90 Tagen unverändert' }];
+type SavedView = { name: string; search: string; status: string; priority: string; assignee: string; dealer: string; country: string; quality: QualityFilter; due: boolean; segment: string; sortField: SortField; sortDirection: 'asc' | 'desc' };
+function viewStorageKey(): string { return `crm_saved_views:${getCurrentUser()?.id || getCurrentUser()?.username || 'unknown'}`; }
+function readSavedViews(): SavedView[] { try { const rows = JSON.parse(localStorage.getItem(viewStorageKey()) || '[]'); return Array.isArray(rows) ? rows.filter((row) => typeof row?.name === 'string').slice(0, 20) : []; } catch { return []; } }
 
 // Quellen-Ansichten (Filter über leadSource/source) — keine DB-Listen.
 const SOURCE_SEGMENTS: { key: string; label: string; match: (l: Lead) => boolean }[] = [
@@ -85,6 +97,10 @@ export function LeadsView({
   onPendingLeadHandled?: () => void;
 } = {}) {
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [lists, setLists] = useState<LeadList[]>([]);
   const [activeSeg, setActiveSeg] = useState<string>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -95,6 +111,9 @@ export function LeadsView({
   const [assignedToFilter, setAssignedToFilter] = useState<string>('all');
   const [dealerTypeFilter, setDealerTypeFilter] = useState<string>('all');
   const [countryFilter, setCountryFilter] = useState<string>('all');
+  const [qualityFilter, setQualityFilter] = useState<QualityFilter>('all');
+  const [savedViews, setSavedViews] = useState<SavedView[]>(readSavedViews);
+  const [activeSavedView, setActiveSavedView] = useState('');
   const [sortField, setSortField] = useState<SortField>('updatedAt');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -108,6 +127,7 @@ export function LeadsView({
   // Wiedervorlage-Filter: nur Leads, deren Follow-up heute oder früher fällig ist.
   const [dueOnly, setDueOnly] = useState(false);
   const [detailLead, setDetailLead] = useState<Lead | null>(null);
+  const [batch, setBatch] = useState<{ operation: LeadBatchOperation; targets: Lead[] } | null>(null);
   // Ab 1280px öffnet die Lead-Maske als gedocktes Seitenpanel neben der Tabelle,
   // darunter als klassisches Modal.
   const [wideScreen, setWideScreen] = useState<boolean>(
@@ -123,6 +143,23 @@ export function LeadsView({
   const [editFromDetail, setEditFromDetail] = useState(false);
 
   const statuses = getStatusOptions();
+  function selectSavedView(name: string) {
+    setActiveSavedView(name);
+    const saved = savedViews.find((item) => item.name === name);
+    if (!saved) return;
+    setSearchTerm(saved.search); setStatusFilter(saved.status); setPriorityFilter(saved.priority); setAssignedToFilter(saved.assignee);
+    setDealerTypeFilter(saved.dealer); setCountryFilter(saved.country); setQualityFilter(saved.quality); setDueOnly(saved.due);
+    setActiveSeg(saved.segment); setSortField(saved.sortField); setSortDirection(saved.sortDirection); setSelected(new Set());
+  }
+  function saveView() {
+    const name = window.prompt('Name für diese persönliche Filteransicht', activeSavedView)?.trim();
+    if (!name) return;
+    const item: SavedView = { name, search: searchTerm, status: statusFilter, priority: priorityFilter, assignee: assignedToFilter, dealer: dealerTypeFilter, country: countryFilter, quality: qualityFilter, due: dueOnly, segment: activeSeg, sortField, sortDirection };
+    const next = [...savedViews.filter((saved) => saved.name !== name), item].slice(-20);
+    try { localStorage.setItem(viewStorageKey(), JSON.stringify(next)); setSavedViews(next); setActiveSavedView(name); toast.success('Persönliche Ansicht auf diesem Gerät gespeichert.'); }
+    catch { toast.error('Der Browser erlaubt das Speichern der Ansicht nicht.'); }
+  }
+  function resetFilters() { setSearchTerm(''); setStatusFilter('all'); setPriorityFilter('all'); setAssignedToFilter('all'); setDealerTypeFilter('all'); setCountryFilter('all'); setQualityFilter('all'); setDueOnly(false); setActiveSeg('all'); setActiveSavedView(''); }
 
   useEffect(() => {
     loadLeads();
@@ -154,8 +191,10 @@ export function LeadsView({
   }, [pendingLeadId, leads]);
 
   const loadLeads = async () => {
-    const data = await getLeads();
-    setLeads(Array.isArray(data) ? data : []);
+    setLoading(true); setLoadError('');
+    try { const data = await getLeads(); setLeads(data); }
+    catch (error) { setLoadError(error instanceof Error ? error.message : 'Leads konnten nicht geladen werden.'); }
+    finally { setLoading(false); }
   };
   const loadLists = async () => setLists(await getLeadLists());
 
@@ -168,12 +207,9 @@ export function LeadsView({
     toast.success(lead.id ? 'Lead aktualisiert.' : 'Lead erstellt.');
   };
 
-  const handleDeleteLead = async (id: string) => {
-    if (confirm('Möchten Sie diesen Lead wirklich löschen?')) {
-      setLeads((prev) => prev.filter((l) => l.id !== id));
-      await deleteLead(id);
-      toast.success('Lead gelöscht.');
-    }
+  const handleDeleteLead = (id: string) => {
+    const lead = leads.find((item) => item.id === id);
+    if (lead) setBatch({ operation: { kind: 'delete' }, targets: [lead] });
   };
 
   // CSV-Import: jede Zeile wird als echter Lead über die API angelegt (POST
@@ -282,10 +318,10 @@ export function LeadsView({
     setLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, status } : l)));
     try {
       await saveLead({ ...lead, status });
-    } catch { /* optimistic */ }
+    } catch { setLeads((prev) => prev.map((l) => l.id === lead.id ? lead : l)); toast.error('Status wurde nicht gespeichert.'); }
   };
 
-  const quickAdd = async (company: string, status = 'Neu') => {
+  const quickAdd = async (company: string, status = defaultOpenStage()) => {
     const c = company.trim();
     if (!c) return;
     const now = new Date().toISOString();
@@ -294,11 +330,11 @@ export function LeadsView({
       source: 'Manuell', priority: 'Mittel', value: 0, tags: [], createdAt: now, updatedAt: now,
     };
     setLeads((prev) => [optimistic, ...prev]);
-    toast.success(`„${c}" hinzugefügt.`);
     try {
       await saveLead({ company: c, status, source: 'Manuell' });
       await loadLeads();
-    } catch { /* optimistic */ }
+      toast.success(`„${c}“ hinzugefügt.`);
+    } catch { setLeads((prev) => prev.filter((l) => l.id !== optimistic.id)); toast.error('Lead wurde nicht angelegt.'); }
   };
 
   const handleSort = (field: SortField) => {
@@ -317,7 +353,7 @@ export function LeadsView({
   /** Follow-up heute oder überfällig? (nextFollowUpDate ist "YYYY-MM-DD") */
   const isDue = (l: Lead): boolean => {
     if (!l.nextFollowUpDate) return false;
-    return l.nextFollowUpDate.slice(0, 10) <= new Date().toISOString().slice(0, 10);
+    return l.nextFollowUpDate.slice(0, 10) <= localDayKey(new Date());
   };
   const dueCount = leads.filter(isDue).length;
 
@@ -333,7 +369,7 @@ export function LeadsView({
 
   const filteredLeads = leads
     .filter((lead) => {
-      if (!segMatch(lead)) return false;
+      if (!segMatch(lead) || !matchesQuality(lead, qualityFilter)) return false;
       const matchesSearch =
         lead.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
         lead.contactPerson.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -357,11 +393,12 @@ export function LeadsView({
     .sort((a, b) => {
       let c = 0;
       if (sortField === 'company') c = a.company.localeCompare(b.company);
-      else if (sortField === 'createdAt') c = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      else if (sortField === 'updatedAt') c = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+      else if (sortField === 'createdAt') c = timestamp(a.createdAt) - timestamp(b.createdAt);
+      else if (sortField === 'updatedAt') c = timestamp(a.updatedAt || a.createdAt) - timestamp(b.updatedAt || b.createdAt);
       else if (sortField === 'value') c = (a.value || 0) - (b.value || 0);
+      else if (sortField === 'nextFollowUpDate') c = (timestamp(a.nextFollowUpDate) || Number.MAX_SAFE_INTEGER) - (timestamp(b.nextFollowUpDate) || Number.MAX_SAFE_INTEGER);
       else if (sortField === 'lastContact') c = lastContactTime(a) - lastContactTime(b);
-      return sortDirection === 'asc' ? c : -c;
+      return (sortDirection === 'asc' ? c : -c) || a.company.localeCompare(b.company, 'de') || a.id.localeCompare(b.id);
     });
 
   // Segment-Counts (über alle Leads).
@@ -414,23 +451,9 @@ export function LeadsView({
   // Bulk-Zuteilung: ausgewählte Leads einem echten Admin-Account zuweisen
   // (username=null → Zuweisung entfernen). PATCH pro Lead schreibt NUR assignedTo
   // (Metadata-Merge im Backend — kein Klobbern anderer Felder).
-  const bulkAssignUser = async (username: string | null) => {
-    if (!selectedRealIds.length) return;
-    const val = username || '';
-    setLeads((prev) => prev.map((l) => (selected.has(l.id) ? { ...l, assignedTo: val } : l)));
-    try {
-      await Promise.all(selectedRealIds.map((id) => saveLead({ id, assignedTo: val })));
-      toast.success(
-        username
-          ? `${selectedRealIds.length} Lead(s) an ${username} zugewiesen.`
-          : `Zuweisung bei ${selectedRealIds.length} Lead(s) entfernt.`,
-      );
-      clearSelection();
-      await loadLeads();
-    } catch (e: any) {
-      toast.error(e?.message || 'Zuweisung fehlgeschlagen');
-      await loadLeads();
-    }
+  const bulkAssignUser = (username: string | null) => {
+    const targets = leads.filter((lead) => selectedRealIds.includes(lead.id));
+    if (targets.length) setBatch({ operation: { kind: 'assign', username }, targets });
   };
 
   /**
@@ -474,14 +497,9 @@ export function LeadsView({
     }
   };
 
-  const bulkDelete = async () => {
-    if (!selectedRealIds.length) return;
-    if (!confirm(`${selectedRealIds.length} Lead(s) wirklich löschen?`)) return;
-    setLeads((prev) => prev.filter((l) => !selected.has(l.id)));
-    clearSelection();
-    await Promise.all(selectedRealIds.map((id) => deleteLead(id)));
-    toast.success('Leads gelöscht.');
-    await loadLeads();
+  const bulkDelete = () => {
+    const targets = leads.filter((lead) => selectedRealIds.includes(lead.id));
+    if (targets.length) setBatch({ operation: { kind: 'delete' }, targets });
   };
   const handleDeleteList = async (id: string, name: string) => {
     if (!confirm(`Liste „${name}" löschen? Die Leads selbst bleiben erhalten.`)) return;
@@ -514,7 +532,8 @@ export function LeadsView({
       { header: 'Quelle', value: (l) => l.source },
       { header: 'Priorität', value: (l) => l.priority },
       { header: 'Wert', value: (l) => l.value },
-      { header: 'Score', value: (l) => l.designScore ?? l.leadScore },
+      { header: 'Basisdaten vorhanden', value: (l) => `${qualityOf(l).complete}/6` },
+      { header: 'Fehlende Daten', value: (l) => qualityOf(l).missing.join(', ') },
       { header: 'Zugewiesen', value: (l) => l.assignedTo },
       { header: 'Erstellt', value: (l) => l.createdAt },
       { header: 'Aktualisiert', value: (l) => l.updatedAt },
@@ -544,6 +563,17 @@ export function LeadsView({
     if (seconds < 604800) return `vor ${Math.floor(seconds / 86400)}d`;
     return new Date(date).toLocaleDateString('de-DE');
   };
+  const activeFilters = [
+    ...(qualityFilter !== 'all' ? [{ label: QUALITY_FILTERS.find((item) => item.value === qualityFilter)?.label || qualityFilter, clear: () => setQualityFilter('all') }] : []),
+    ...(statusFilter !== 'all' ? [{ label: statusFilter, clear: () => setStatusFilter('all') }] : []),
+    ...(assignedToFilter !== 'all' ? [{ label: assignedToFilter, clear: () => setAssignedToFilter('all') }] : []),
+    ...(priorityFilter !== 'all' ? [{ label: priorityFilter, clear: () => setPriorityFilter('all') }] : []),
+    ...(dealerTypeFilter !== 'all' ? [{ label: dealerTypeFilter === 'unclassified' ? 'Noch einordnen' : dealerLabel(dealerTypeFilter as Lead['dealerType']), clear: () => setDealerTypeFilter('all') }] : []),
+    ...(countryFilter !== 'all' ? [{ label: COUNTRY_LABELS[countryFilter], clear: () => setCountryFilter('all') }] : []),
+    ...(activeSeg !== 'all' ? [{ label: lists.find((list) => 'list:' + list.id === activeSeg)?.name || SOURCE_SEGMENTS.find((item) => item.key === activeSeg)?.label || 'Liste', clear: () => setActiveSeg('all') }] : []),
+  ];
+  const activeFilterCount = activeFilters.length;
+
   const stripUrl = (u: string) => u.replace(/^https?:\/\//, '').replace(/\/$/, '');
 
   return (
@@ -558,100 +588,44 @@ export function LeadsView({
           ganz ein, und der Untertitel stand mit einem Wort pro Zeile
           untereinander. Ueber die volle Breite passt alles in eine Zeile. */}
       <div className={cn(KOPF_BEREICH, 'mx-auto w-full max-w-[1620px] space-y-3.5')}>
-      <PageHeader
-        title="Leads"
-        subtitle="Verwalten Sie Ihre Leads, Quellen und eigenen Listen."
-        actions={
-          <>
-            <Button variant="secondary" onClick={handleEnrichMissing} disabled={enriching}>
-              <Phone className={cn('size-4', enriching && 'animate-pulse')} />
-              <span className="hidden sm:inline">{enriching ? 'Ziehe Nummern…' : 'Nummern nachziehen'}</span>
-            </Button>
-            <Button variant="secondary" onClick={() => setDuplicatesOpen(true)}>
-              <Copy className="size-4" /><span className="hidden sm:inline">Dubletten</span>
-            </Button>
-            <Button variant="secondary" onClick={() => setIsImportModalOpen(true)}>
-              <Upload className="size-4" /><span className="hidden sm:inline">Importieren</span>
-            </Button>
-            <Button variant="secondary" onClick={exportCsv}><Download className="size-4" /><span className="hidden sm:inline">Export</span></Button>
-            <Button onClick={() => { setEditingLead(null); setEditFromDetail(false); setIsModalOpen(true); }}>
-              <Plus className="size-4" /><span className="hidden sm:inline">Neuer Lead</span><span className="sm:hidden">Neu</span>
-            </Button>
-          </>
-        }
-      />
-
-      {/* Lead-Listen-Leiste (Quellen + eigene Listen) */}
-      <SegmentBar
-        active={activeSeg}
-        onSelect={(k) => { setActiveSeg(k); clearSelection(); }}
-        lists={lists}
-        segCount={segCount}
-        onCreate={createAndAssign}
-        onDeleteList={handleDeleteList}
-      />
-
-      {/* Filters + View toggle */}
-      <Card className="p-3">
-        <div className="grid gap-2.5 2xl:grid-cols-[minmax(190px,1fr)_auto] 2xl:items-center">
-          <div className="relative min-w-0">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-text-muted" />
-            <input
-              type="text"
-              placeholder="Suche nach Firma, Kontakt oder E-Mail…"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className={`${inputClass} h-9 pl-9`}
-            />
+      <PageHeader title="Leads" subtitle="Kontakte qualifizieren und den nächsten Schritt planen." actions={<>
+        <details className="relative" open={toolsOpen} onToggle={(event) => setToolsOpen(event.currentTarget.open)}>
+          <summary className="flex h-9 cursor-pointer list-none items-center gap-2 rounded-md border border-border-subtle bg-surface px-3 text-sm">Werkzeuge <ChevronDown className="size-4" /></summary>
+          <div className="absolute right-0 z-40 mt-2 flex w-56 flex-col gap-1 rounded-md border border-border-subtle bg-surface p-2 shadow-modal">
+            <Button variant="ghost" onClick={() => { setToolsOpen(false); setIsImportModalOpen(true); }}><Upload className="size-4" />Importieren</Button>
+            <Button variant="ghost" onClick={() => { setToolsOpen(false); exportCsv(); }}><Download className="size-4" />Ansicht exportieren</Button>
+            <Button variant="ghost" onClick={() => { setToolsOpen(false); setDuplicatesOpen(true); }}><Copy className="size-4" />Dubletten prüfen</Button>
+            <Button variant="ghost" onClick={handleEnrichMissing} disabled={enriching}><Phone className="size-4" />{enriching ? 'Nummern werden gesucht…' : 'Nummern nachziehen'}</Button>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5 2xl:flex-nowrap">
-            <Filter className="size-4 shrink-0 text-text-muted" />
-            <CustomSelect
-              className="w-[148px] shrink-0"
-              value={dealerTypeFilter === 'all' ? 'Alle Händlerarten' : dealerTypeFilter === 'neuteile' ? 'Neuteilehändler' : dealerTypeFilter === 'gebrauchtteile' ? 'Gebrauchtteilehändler' : 'Noch einordnen'}
-              onChange={(v) => setDealerTypeFilter(v === 'Alle Händlerarten' ? 'all' : v === 'Neuteilehändler' ? 'neuteile' : v === 'Gebrauchtteilehändler' ? 'gebrauchtteile' : 'unclassified')}
-              options={['Alle Händlerarten', 'Neuteilehändler', 'Gebrauchtteilehändler', 'Noch einordnen']}
-            />
-            <CustomSelect
-              className="w-[126px] shrink-0"
-              value={countryFilter === 'all' ? 'Alle Länder' : COUNTRY_LABELS[countryFilter] || countryFilter}
-              onChange={(v) => setCountryFilter(v === 'Alle Länder' ? 'all' : Object.entries(COUNTRY_LABELS).find(([, label]) => label === v)?.[0] || 'all')}
-              options={['Alle Länder', ...Object.values(COUNTRY_LABELS)]}
-            />
-            <CustomSelect className="w-[126px] shrink-0" value={statusFilter === 'all' ? 'Alle Status' : statusFilter}
-              onChange={(v) => setStatusFilter(v === 'Alle Status' ? 'all' : v)} options={['Alle Status', ...statuses]} />
-            <CustomSelect className="w-[140px] shrink-0" value={priorityFilter === 'all' ? 'Alle Prioritäten' : priorityFilter}
-              onChange={(v) => setPriorityFilter(v === 'Alle Prioritäten' ? 'all' : v)} options={['Alle Prioritäten', 'Hoch', 'Mittel', 'Niedrig']} />
-            <CustomSelect className="w-[132px] shrink-0" value={assignedToFilter === 'all' ? 'Alle Benutzer' : assignedToFilter}
-              onChange={(v) => setAssignedToFilter(v === 'Alle Benutzer' ? 'all' : v)} options={assignedUsers} />
-            <CustomSelect
-              className="w-[158px] shrink-0"
-              value={SORT_PRESETS.find((o) => o.field === sortField && o.dir === sortDirection)?.label || 'Sortierung'}
-              onChange={(v) => {
-                const o = SORT_PRESETS.find((x) => x.label === v);
-                if (o) { setSortField(o.field); setSortDirection(o.dir); }
-              }}
-              options={SORT_PRESETS.map((o) => o.label)}
-            />
-            <button
-              type="button"
-              onClick={() => setDueOnly((d) => !d)}
-              title="Nur Leads mit fälligem Follow-up (heute oder überfällig)"
-              className={cn(
-                'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm transition-colors',
-                dueOnly
-                  ? 'border-status-warning/40 bg-status-warning/15 text-status-warning'
-                  : 'border-border-strong text-text-secondary hover:bg-elevated',
-              )}
-            >
-              <CalendarClock className="size-4" />
-              Fällig{dueCount > 0 && <span className="tabular-nums">({dueCount})</span>}
-            </button>
-            <ViewToggle view={view} onChange={setView} />
-          </div>
+        </details>
+        <Button onClick={() => { setEditingLead(null); setEditFromDetail(false); setIsModalOpen(true); }}><Plus className="size-4" />Neuer Lead</Button>
+      </>} />
+      <div className="rounded-lg border border-border-subtle bg-surface">
+        <div className="flex flex-wrap items-center gap-2 p-3">
+          <div className="relative min-w-48 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-text-muted" /><input aria-label="Leads durchsuchen" placeholder="Firma, Kontakt oder E-Mail suchen" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} className={cn(inputClass, 'h-9 pl-9')} /></div>
+          <select aria-label="Gespeicherte Ansicht" className={cn(inputClass, 'w-full sm:w-48')} value={activeSavedView} onChange={(event) => selectSavedView(event.target.value)}><option value="">Persönliche Ansichten</option>{savedViews.map((saved) => <option key={saved.name} value={saved.name}>{saved.name}</option>)}</select>
+          <Button variant="secondary" aria-expanded={filtersOpen} aria-controls="lead-filters" onClick={() => setFiltersOpen(!filtersOpen)}><Filter className="size-4" />Filter{activeFilterCount ? ' (' + activeFilterCount + ')' : ''}</Button>
+          <Button variant={dueOnly ? 'primary' : 'ghost'} aria-pressed={dueOnly} onClick={() => setDueOnly(!dueOnly)}><CalendarClock className="size-4" />Fällig ({dueCount})</Button>
+          <ViewToggle view={view} onChange={setView} />
         </div>
-      </Card>
+        {filtersOpen && <div id="lead-filters" className="space-y-3 border-t border-border-subtle p-3">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <label className="space-y-1 text-sm text-text-secondary">Datenqualität<select aria-label="Datenqualität filtern" className={inputClass} value={qualityFilter} onChange={(event) => setQualityFilter(event.target.value as QualityFilter)}>{QUALITY_FILTERS.map((filter) => <option key={filter.value} value={filter.value}>{filter.label}</option>)}</select></label>
+            <label className="space-y-1 text-sm text-text-secondary">Phase<CustomSelect className="w-full" value={statusFilter === 'all' ? 'Alle Phasen' : statusFilter} onChange={(value) => setStatusFilter(value === 'Alle Phasen' ? 'all' : value)} options={['Alle Phasen', ...statuses]} /></label>
+            <label className="space-y-1 text-sm text-text-secondary">Zuständigkeit<CustomSelect className="w-full" value={assignedToFilter === 'all' ? 'Alle Benutzer' : assignedToFilter} onChange={(value) => setAssignedToFilter(value === 'Alle Benutzer' ? 'all' : value)} options={assignedUsers} /></label>
+            <label className="space-y-1 text-sm text-text-secondary">Sortierung<CustomSelect className="w-full" value={SORT_PRESETS.find((option) => option.field === sortField && option.dir === sortDirection)?.label || 'Sortierung'} onChange={(value) => { const option = SORT_PRESETS.find((item) => item.label === value); if (option) { setSortField(option.field); setSortDirection(option.dir); } }} options={SORT_PRESETS.map((option) => option.label)} /></label>
+            <label className="space-y-1 text-sm text-text-secondary">Händlerart<select className={inputClass} value={dealerTypeFilter} onChange={(event) => setDealerTypeFilter(event.target.value)}><option value="all">Alle Händlerarten</option><option value="neuteile">Neuteile</option><option value="gebrauchtteile">Gebrauchtteile</option><option value="unclassified">Noch einordnen</option></select></label>
+            <label className="space-y-1 text-sm text-text-secondary">Land<select className={inputClass} value={countryFilter} onChange={(event) => setCountryFilter(event.target.value)}><option value="all">Alle Länder</option>{Object.entries(COUNTRY_LABELS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label>
+            <label className="space-y-1 text-sm text-text-secondary">Priorität<CustomSelect className="w-full" value={priorityFilter === 'all' ? 'Alle Prioritäten' : priorityFilter} onChange={(value) => setPriorityFilter(value === 'Alle Prioritäten' ? 'all' : value)} options={['Alle Prioritäten', 'Hoch', 'Mittel', 'Niedrig']} /></label>
+          </div>
+          <div><p className="mb-2 text-sm text-text-secondary">Quelle oder Liste</p><SegmentBar active={activeSeg} onSelect={(key) => { setActiveSeg(key); clearSelection(); }} lists={lists} segCount={segCount} onCreate={createAndAssign} onDeleteList={handleDeleteList} /></div>
+          <div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={saveView}>Als persönliche Ansicht speichern</Button><Button size="sm" variant="ghost" onClick={resetFilters}>Filter zurücksetzen</Button>{activeSavedView && <Button size="sm" variant="ghost" onClick={() => { const next = savedViews.filter((saved) => saved.name !== activeSavedView); try { localStorage.setItem(viewStorageKey(), JSON.stringify(next)); setSavedViews(next); setActiveSavedView(''); } catch { toast.error('Ansicht konnte nicht entfernt werden.'); } }}>Ansicht entfernen</Button>}</div>
+        </div>}
+        {activeFilterCount > 0 && !filtersOpen && <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle px-3 py-2 text-sm text-text-secondary">{activeFilters.map((filter) => <button key={filter.label} onClick={filter.clear} className="inline-flex items-center gap-1 rounded border border-border-subtle px-2 py-1">{filter.label}<X className="size-3" /><span className="sr-only">entfernen</span></button>)}</div>}
+      </div>
 
+      {loadError && <LoadError message={loadError} onRetry={() => void loadLeads()} />}
+      {loading && <p role="status" className="py-2 text-sm text-text-muted">Leads werden geladen…</p>}
       {/* Bulk-Aktionsleiste */}
       {selectedRealIds.length > 0 && (
         <BulkBar
@@ -677,12 +651,7 @@ export function LeadsView({
           ans Ende kam, schob unversehens die Seite weiter. */}
       <div className={cn(ARBEITSFLAECHE, 'mx-auto w-full max-w-[1620px]')}>
         <div className={cn(SPALTE_SCROLLT, 'min-w-0 flex-1 space-y-3.5 pb-2')}>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="Alle Leads" value={leads.length} />
-        <StatCard label="Neuteilehändler" value={leads.filter((l) => l.dealerType === 'neuteile').length} />
-        <StatCard label="Gebrauchtteilehändler" value={leads.filter((l) => l.dealerType === 'gebrauchtteile' || l.dealerType === 'verwerter').length} />
-        <StatCard label="Noch einordnen" value={leads.filter((l) => !l.dealerType).length} />
-      </div>
+      <div className="flex items-center justify-between px-1 py-3 text-sm text-text-muted"><span>{loading ? 'Wird geladen…' : loadError ? 'Daten nicht verfügbar' : `${filteredLeads.length} von ${leads.length} Leads`}</span><span className="hidden sm:inline">Klicke auf eine Firma, um den Lead zu bearbeiten.</span></div>
 
       {view === 'board' ? (
         <BoardView statuses={statuses} leads={filteredLeads} onOpen={setDetailLead} onQuickAdd={quickAdd} />
@@ -690,7 +659,7 @@ export function LeadsView({
         <>
           <Card className="hidden overflow-visible md:block">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="crm-lead-table w-full text-sm" data-compact={compact}>
                 <thead>
                   <tr className="border-b border-border-subtle bg-elevated/50">
                     <th className="w-10 px-3 py-2.5">
@@ -699,19 +668,18 @@ export function LeadsView({
                     <SortHead label="Firma" field="company" sortField={sortField} dir={sortDirection} onSort={handleSort} />
                     {!compact && <th className="label-technical px-3 py-2.5 text-left text-text-muted">Händler / Land</th>}
                     {!compact && <th className="label-technical px-3 py-2.5 text-left text-text-muted">Kontakt</th>}
-                    {!compact && <th className="label-technical px-3 py-2.5 text-center text-text-muted">Score</th>}
+                    {!compact && <th className="label-technical px-3 py-2.5 text-center text-text-muted">Datenqualität</th>}
                     <th className="label-technical px-3 py-2.5 text-left text-text-muted">Status</th>
                     {!compact && <th className="label-technical px-3 py-2.5 text-left text-text-muted">Priorität</th>}
                     {!compact && <th className="label-technical px-3 py-2.5 text-left text-text-muted">Zugewiesen</th>}
                     {!compact && <SortHead label="Quelle / Wert" field="value" sortField={sortField} dir={sortDirection} onSort={handleSort} />}
-                    <SortHead label="Letzter Kontakt" field="lastContact" sortField={sortField} dir={sortDirection} onSort={handleSort} />
+                    <SortHead label="Nächster Schritt" field="nextFollowUpDate" sortField={sortField} dir={sortDirection} onSort={handleSort} />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border-subtle">
                   {filteredLeads.map((lead) => {
-                    const score = lead.designScore || lead.leadScore;
-                    const stn = scoreTone(score);
-                    const website = lead.website || lead.websiteUrl;
+                    const quality = qualityOf(lead);
+                    const website = safeWebsiteUrl(lead.website || lead.websiteUrl);
                     const isSel = selected.has(lead.id);
                     return (
                       <tr key={lead.id} onClick={() => setDetailLead(lead)}
@@ -727,7 +695,7 @@ export function LeadsView({
                           <div className="flex items-center gap-2.5">
                             <div className="flex size-9 flex-shrink-0 items-center justify-center rounded-md bg-accent-500/15 font-semibold text-accent-500">{lead.company[0]}</div>
                             <div className="min-w-0">
-                              <div className="truncate font-medium text-text-primary">{lead.company}</div>
+                              <button className="block max-w-full truncate text-left font-medium text-text-primary hover:text-accent-500 focus-visible:underline" aria-label={`Lead ${lead.company} öffnen`} onClick={(event) => { event.stopPropagation(); setDetailLead(lead); }}>{lead.company}</button>
                               <div className="truncate text-xs text-text-muted">{lead.industry || lead.niche || lead.city || 'Keine Branche'}</div>
                               {website && (
                                 <a href={website} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
@@ -769,12 +737,10 @@ export function LeadsView({
                         )}
                         {!compact && (
                         <td className="px-3 py-2.5 text-center">
-                          {score ? (
-                            <div className="flex flex-col items-center gap-1">
-                              <Badge tone={stn.tone}>{score}/100</Badge>
-                              <span className="text-[10px] text-text-muted">{stn.label}</span>
-                            </div>
-                          ) : <span className="text-xs text-text-muted">—</span>}
+                          <div className="flex flex-col items-center gap-1" title={quality.explanation}>
+                            <Badge tone="neutral">{quality.complete}/{quality.total} erfasst</Badge>
+                            <span className="max-w-36 text-xs text-text-muted">{quality.missing.length ? quality.missing.slice(0, 2).join(', ') + ' fehlt' : 'Basis vollständig'}</span>
+                          </div>
                         </td>
                         )}
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
@@ -805,12 +771,13 @@ export function LeadsView({
                         </td>
                         )}
                         <td className="max-w-[240px] px-3 py-2.5">
+                          <p className={cn("mb-1 text-sm font-medium", isDue(lead) ? "text-status-warning" : "text-text-primary")}>{lead.nextFollowUpDate ? new Date(lead.nextFollowUpDate).toLocaleDateString("de-DE") : "Noch nicht geplant"}</p>
                           {lead.lastContactDate ? (
                             <div className="flex items-center gap-2 text-xs text-text-secondary">
                               <Phone className="size-3 shrink-0" /><span>{formatRelativeTime(lead.lastContactDate)}</span>
                             </div>
                           ) : (
-                            <span className="text-xs font-medium text-status-warning">Nie</span>
+                            <span className="text-xs text-text-muted">Noch kein Kontakt</span>
                           )}
                           {lead.lastNote && (
                             <p
@@ -826,7 +793,7 @@ export function LeadsView({
                   })}
                 </tbody>
               </table>
-              {filteredLeads.length === 0 && (
+              {!loading && !loadError && filteredLeads.length === 0 && (
                 <EmptyState icon={<Search className="size-5" />} title="Keine Leads gefunden" description="Andere Ansicht/Filter wählen oder über den Lead-Scraper neue Leads ziehen." />
               )}
               <div className="border-t border-border-subtle px-4 py-2"><QuickAdd onAdd={(c) => quickAdd(c)} /></div>
@@ -835,35 +802,9 @@ export function LeadsView({
 
           {/* Mobile Cards */}
           <div className="space-y-3 md:hidden">
-            {filteredLeads.map((lead) => (
-              <Card key={lead.id} hover className="p-4">
-                <div className="mb-3 flex items-start gap-3">
-                  <CheckBox checked={selected.has(lead.id)} onChange={() => toggleOne(lead.id)} ariaLabel="auswählen" />
-                  <div className="flex size-11 flex-shrink-0 items-center justify-center rounded-md bg-accent-500/15 text-lg font-semibold text-accent-500">{lead.company[0]}</div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate font-medium text-text-primary">{lead.company}</h3>
-                    <p className="truncate text-sm text-text-muted">{lead.contactPerson}</p>
-                    <p className="mt-1 truncate text-xs text-text-muted">{lead.email}</p>
-                  </div>
-                </div>
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <StatusSelect value={lead.status} options={statuses} onChange={(s) => changeStatus(lead, s)} />
-                  {lead.priority && <PriorityPill priority={lead.priority} />}
-                  <Badge tone={lead.dealerType === 'gebrauchtteile' || lead.dealerType === 'verwerter' ? 'used' : lead.dealerType === 'neuteile' ? 'accent' : 'neutral'}>{dealerLabel(lead.dealerType)}</Badge>
-                  <Badge tone="neutral">{COUNTRY_LABELS[countryCode(lead.country)] || lead.country || 'Land offen'}</Badge>
-                  <Badge tone="neutral">{lead.source}</Badge>
-                </div>
-                <div className="flex items-center justify-between border-t border-border-subtle pt-3">
-                  <span className="font-semibold text-text-primary tabular-nums">€{lead.value?.toLocaleString('de-DE') || '0'}</span>
-                  <div className="flex items-center gap-1">
-                    <IconButton onClick={() => setDetailLead(lead)} aria-label="Details"><Eye className="size-4" /></IconButton>
-                    <IconButton onClick={() => handleEditClick(lead)} aria-label="Bearbeiten"><Edit className="size-4" /></IconButton>
-                    <IconButton tone="danger" onClick={() => handleDeleteLead(lead.id)} aria-label="Löschen"><Trash2 className="size-4" /></IconButton>
-                  </div>
-                </div>
-              </Card>
-            ))}
-            {filteredLeads.length === 0 && (
+            {filteredLeads.map((lead) => <LeadMobileCard key={lead.id} lead={lead} selected={selected.has(lead.id)} statuses={statuses} due={isDue(lead)}
+              onSelect={() => toggleOne(lead.id)} onOpen={() => setDetailLead(lead)} onEdit={() => handleEditClick(lead)} onDelete={() => handleDeleteLead(lead.id)} onStatus={(status) => void changeStatus(lead, status)} />)}
+            {!loading && !loadError && filteredLeads.length === 0 && (
               <Card><EmptyState icon={<Search className="size-5" />} title="Keine Leads gefunden" description="Andere Ansicht/Filter wählen." /></Card>
             )}
           </div>
@@ -876,7 +817,7 @@ export function LeadsView({
             Hoehe musste aus Kopfzeile und Klebeabstand errechnet werden. Jetzt
             ist sie einfach so hoch wie die Arbeitsflaeche, ohne jede
             Rechnung. */}
-        {detailLead && wideScreen && (
+        {detailLead && !batch && wideScreen && (
           <aside className="flex min-h-0 w-[540px] shrink-0 flex-col xl:w-[600px] 2xl:w-[680px]">
             <LeadDetailModal
               key={detailLead.id}
@@ -885,7 +826,7 @@ export function LeadsView({
               onClose={() => setDetailLead(null)}
               onEdit={(lead) => { setDetailLead(null); setEditingLead(lead); setEditFromDetail(true); setIsModalOpen(true); }}
               onLeadChanged={loadLeads}
-              onDelete={() => { handleDeleteLead(detailLead.id); setDetailLead(null); }}
+              onDelete={() => handleDeleteLead(detailLead.id)}
             />
           </aside>
         )}
@@ -893,6 +834,18 @@ export function LeadsView({
 
       {isImportModalOpen && <ImportModal onClose={() => setIsImportModalOpen(false)} onImport={handleImportLeads} />}
       {duplicatesOpen && <DuplicatesModal onClose={() => setDuplicatesOpen(false)} onMerged={loadLeads} />}
+      {batch && <LeadBatchDialog operation={batch.operation} targets={batch.targets} onClose={() => { setBatch(null); void loadLeads(); }} onResult={(outcomes) => {
+        const successful = new Set(outcomes.filter((result) => result.ok).map((result) => result.item.id));
+        const failed = outcomes.filter((result) => !result.ok).map((result) => result.item.id);
+        setSelected((previous) => new Set([...previous].filter((id) => !successful.has(id)).concat(failed)));
+        if (batch.operation.kind === 'delete') {
+          setLeads((previous) => previous.filter((lead) => !successful.has(lead.id)));
+          setDetailLead((previous) => previous && successful.has(previous.id) ? null : previous);
+        } else {
+          const username = batch.operation.username || '';
+          setLeads((previous) => previous.map((lead) => successful.has(lead.id) ? { ...lead, assignedTo: username } : lead));
+        }
+      }} />}
       {isModalOpen && (
         <LeadModal
           lead={editingLead}
@@ -908,11 +861,11 @@ export function LeadsView({
         />
       )}
       {/* Schmale Screens: klassisches Modal statt Seitenpanel */}
-      {detailLead && !wideScreen && (
+      {detailLead && !batch && !wideScreen && (
         <LeadDetailModal lead={detailLead} onClose={() => setDetailLead(null)}
           onEdit={(lead) => { setDetailLead(null); setEditingLead(lead); setEditFromDetail(true); setIsModalOpen(true); }}
           onLeadChanged={loadLeads}
-          onDelete={() => { handleDeleteLead(detailLead.id); setDetailLead(null); }} />
+          onDelete={() => handleDeleteLead(detailLead.id)} />
       )}
     </div>
   );

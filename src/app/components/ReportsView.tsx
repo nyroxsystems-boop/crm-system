@@ -4,8 +4,10 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, RadialBarChart, RadialBar, PolarAngleAxis,
 } from 'recharts';
+import { LoadError } from './LoadError';
+import { leadCategory, stageCategory } from '../utils/stages';
 import { getLeads, getSettings, type Lead } from '../utils/storage';
-import { Card, EmptyState, PageHeader, SEITEN_RAND, SectionLabel, StatCard, statusColor } from './ui-kit';
+import { Card, EmptyState, PageHeader, SEITEN_RAND, SectionLabel, StatCard, statusColor, inputClass, Button } from './ui-kit';
 import { Reveal, Item, AnimatedNumber } from './anim';
 import { cn } from './ui/utils';
 
@@ -29,23 +31,32 @@ function useChartTheme() {
 }
 
 export function ReportsView() {
-  const [leads, setLeads] = useState<Lead[]>([]);
+  const [loadError, setLoadError] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadTick, setLoadTick] = useState(0);
+  const [allLeads, setLeads] = useState<Lead[]>([]);
+  const [source, setSource] = useState('all');
+  const [owner, setOwner] = useState('all');
+  const [createdFrom, setCreatedFrom] = useState('');
+  const [createdTo, setCreatedTo] = useState('');
+  const leads = useMemo(() => allLeads.filter((lead) => (source === 'all' || lead.source === source)
+    && (owner === 'all' || lead.assignedTo === owner) && (!createdFrom || lead.createdAt.slice(0, 10) >= createdFrom)
+    && (!createdTo || lead.createdAt.slice(0, 10) <= createdTo)), [allLeads, source, owner, createdFrom, createdTo]);
   const theme = useChartTheme();
 
   useEffect(() => {
     (async () => {
+      setLoading(true); setLoadError(false);
       try {
         const data = await getLeads();
         setLeads(Array.isArray(data) ? data : []);
-      } catch {
-        setLeads([]);
-      }
+      } catch { setLoadError(true); } finally { setLoading(false); }
     })();
-  }, []);
+  }, [loadTick]);
 
   const total = leads.length;
-  const won = leads.filter((l) => l.status === 'Gewonnen');
-  const lost = leads.filter((l) => l.status === 'Verloren');
+  const won = leads.filter((l) => leadCategory(l) === 'won');
+  const lost = leads.filter((l) => leadCategory(l) === 'lost');
   const wonValue = won.reduce((s, l) => s + (l.value || 0), 0);
   const totalValue = leads.reduce((s, l) => s + (l.value || 0), 0);
   const winRate = won.length + lost.length > 0 ? Math.round((won.length / (won.length + lost.length)) * 100) : 0;
@@ -55,7 +66,7 @@ export function ReportsView() {
   // Funnel (Pipeline-Reihenfolge)
   const stages = getSettings().pipelineStages.filter((s) => s.isActive).sort((a, b) => a.order - b.order);
   const funnel = stages
-    .filter((s) => s.name !== 'Verloren')
+    .filter((s) => stageCategory(s) !== 'lost')
     .map((s) => ({ name: s.name, count: leads.filter((l) => l.status === s.name).length }));
   const funnelMax = Math.max(1, ...funnel.map((f) => f.count));
 
@@ -111,7 +122,7 @@ export function ReportsView() {
     fontSize: '12px',
   };
 
-  if (total === 0) {
+  if (allLeads.length === 0) {
     return (
       <div className={cn(SEITEN_RAND, 'space-y-6')}>
         <PageHeader title="Berichte" subtitle="Auswertungen über Ihre Vertriebs-Pipeline." />
@@ -122,22 +133,26 @@ export function ReportsView() {
     );
   }
 
+  if (loadError) return <div className={SEITEN_RAND}><PageHeader title="Berichte" subtitle="Aktueller Lead-Bestand" /><LoadError message="Berichte konnten nicht geladen werden." onRetry={() => setLoadTick((tick) => tick + 1)} /></div>;
+  if (loading) return <p role="status" className={SEITEN_RAND}>Berichte werden geladen…</p>;
   return (
     <div className={cn(SEITEN_RAND, 'space-y-6')}>
       <PageHeader title="Berichte" subtitle="Auswertungen über Ihre Vertriebs-Pipeline." />
+      <Card className="p-4"><div className="flex flex-wrap items-end gap-3"><label className="text-sm text-text-secondary">Quelle<select className={inputClass} value={source} onChange={(e) => setSource(e.target.value)}><option value="all">Alle Quellen</option>{[...new Set(allLeads.map((lead) => lead.source).filter(Boolean))].sort().map((item) => <option key={item}>{item}</option>)}</select></label><label className="text-sm text-text-secondary">Zuständigkeit<select className={inputClass} value={owner} onChange={(e) => setOwner(e.target.value)}><option value="all">Gesamtes Team</option>{[...new Set(allLeads.map((lead) => lead.assignedTo).filter(Boolean))].sort().map((item) => <option key={item}>{item}</option>)}</select></label><label className="text-sm text-text-secondary">Erstellt ab<input className={inputClass} type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} /></label><label className="text-sm text-text-secondary">Erstellt bis<input className={inputClass} type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} /></label><Button variant="ghost" onClick={() => { setSource('all'); setOwner('all'); setCreatedFrom(''); setCreatedTo(''); }}>Zurücksetzen</Button><span className="ml-auto text-sm text-text-muted">{total} Leads in dieser Auswertung</span></div></Card>
+      <p className="text-sm text-text-secondary">Bestandsauswertung nach Erstellungsdatum. Werte sind gepflegte Verkaufschancen, kein gebuchter Umsatz. Phasenanteile bilden keine historische Conversion ab.</p>
 
       {/* KPIs */}
       <Reveal className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Item><StatCard icon={<Trophy className="size-4" />} label="Gewonnener Wert" value={<AnimatedNumber value={wonValue} format={EUR0} />} hint={`${won.length} Abschlüsse`} /></Item>
         <Item><StatCard icon={<Percent className="size-4" />} label="Win-Rate" value={<AnimatedNumber value={winRate} format={(n) => Math.round(n) + '%'} />} hint={`${won.length} gewonnen · ${lost.length} verloren`} /></Item>
         <Item><StatCard icon={<Award className="size-4" />} label="Ø Abschluss" value={<AnimatedNumber value={avgDeal} format={EUR0} />} /></Item>
-        <Item><StatCard icon={<Target className="size-4" />} label="Conversion" value={<AnimatedNumber value={conversion} format={(n) => Math.round(n) + '%'} />} hint={`von ${total} Leads`} /></Item>
+        <Item><StatCard icon={<Target className="size-4" />} label="Anteil gewonnen" value={<AnimatedNumber value={conversion} format={(n) => Math.round(n) + '%'} />} hint={`von ${total} Leads`} /></Item>
       </Reveal>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Funnel */}
         <Card className="p-4 lg:col-span-2">
-          <SectionLabel className="mb-4 block">Conversion-Funnel</SectionLabel>
+          <SectionLabel className="mb-4 block">Aktueller Bestand nach Phase</SectionLabel>
           <div className="space-y-2.5">
             {funnel.map((f) => (
               <div key={f.name} className="flex items-center gap-3">
@@ -145,7 +160,7 @@ export function ReportsView() {
                 <div className="h-7 flex-1 overflow-hidden rounded-md bg-elevated/60">
                   <div
                     className="flex h-full items-center justify-end rounded-md px-2 text-xs font-semibold text-white transition-all duration-700"
-                    style={{ width: `${Math.max(6, (f.count / funnelMax) * 100)}%`, backgroundColor: statusColor(f.name) }}
+                    style={{ width: `${(f.count / funnelMax) * 100}%`, backgroundColor: statusColor(f.name) }}
                   >
                     {f.count}
                   </div>
@@ -178,7 +193,7 @@ export function ReportsView() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Value over time */}
         <Card className="p-4">
-          <SectionLabel className="mb-4 block">Lead-Wert über Zeit</SectionLabel>
+          <SectionLabel className="mb-4 block">Lead-Wert nach Erstellungsmonat</SectionLabel>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={byMonth} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
               <defs>

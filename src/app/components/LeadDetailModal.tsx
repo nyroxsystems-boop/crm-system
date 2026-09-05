@@ -1,3 +1,8 @@
+import { useAppointmentConflicts } from '../utils/useAppointmentConflicts';
+import { AppointmentConflictReview } from './AppointmentConflictReview';
+import { LoadError } from './LoadError';
+import { leadCategory } from '../utils/stages';
+import { safeWebsiteUrl } from '../utils/safeUrl';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Mail, Phone, User, Calendar, Edit, Trash2, Globe, MapPin, Tag as TagIcon,
@@ -14,7 +19,7 @@ import {
 } from '../utils/storage';
 import { sendBrochure } from '../utils/brochure';
 import {
-  Modal, Button, IconButton, Badge, StatusBadge, PriorityPill, EmptyState, SectionLabel, inputClass, cn, scoreTone,
+  Modal, Button, IconButton, Badge, StatusBadge, PriorityPill, EmptyState, SectionLabel, inputClass, cn,
 } from './ui-kit';
 import { CustomSelect } from './CustomSelect';
 
@@ -194,6 +199,9 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
   const [dmName, setDmName] = useState(lead.decisionMakerName || '');
   const [dmReached, setDmReached] = useState<boolean>(!!lead.reachedDecisionMaker);
 
+  const [detailTab, setDetailTab] = useState<'activity' | 'next' | 'info'>('activity');
+  const [activityError, setActivityError] = useState(false);
+  const [appointmentError, setAppointmentError] = useState(false);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -222,20 +230,21 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
   const [planDuration, setPlanDuration] = useState(15);
   const [planAssignee, setPlanAssignee] = useState('');
   const [planNote, setPlanNote] = useState('');
+  const planReview = useAppointmentConflicts(planOpen, `${planDate}T${planTime}`, planDuration, planAssignee);
 
   const reload = useCallback(async () => {
-    setLoading(true);
-    setActivities(await getActivities(lead.id));
-    setLoading(false);
+    setLoading(true); setActivityError(false);
+    try { setActivities(await getActivities(lead.id)); } catch { setActivityError(true); } finally { setLoading(false); }
   }, [lead.id]);
 
   useEffect(() => { void reload(); }, [reload]);
 
   const reloadAppts = useCallback(async () => {
+    setAppointmentError(false);
     try {
       const rows = await getAppointments({ companyId: lead.id });
       setAppts(rows.filter((a) => a.status === 'proposed' || a.status === 'confirmed'));
-    } catch { /* Termin-Abschnitt ist nicht kritisch */ }
+    } catch { setAppointmentError(true); }
   }, [lead.id]);
 
   useEffect(() => { void reloadAppts(); }, [reloadAppts]);
@@ -254,13 +263,8 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
     try {
       const result = await sendBrochure(lead);
       toast.success(`Broschüre an ${result.recipient} gesendet (${result.recipientSource}).`);
-      // Versand im Protokoll festhalten. Best effort — die Mail ist bereits
-      // raus, ein fehlgeschlagener Log-Eintrag darf das nicht als Fehler zeigen.
+      // The server records the confirmed send exactly once.
       try {
-        await createActivity(lead.id, {
-          type: 'email',
-          body: `Broschüre per E-Mail an ${result.recipient} gesendet (${result.recipientSource}).`,
-        });
         await reload();
         onLeadChanged?.();
       } catch { /* Protokoll-Eintrag ist nicht kritisch */ }
@@ -272,9 +276,13 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
   };
 
   const scheduleCall = async () => {
+    if (planSaving) return;
+    if (!planAssignee) { toast.error('Bitte eine zuständige Person auswählen.'); return; }
+    if (planReview.loading || planReview.error) { toast.error('Bitte zuerst die Verfügbarkeit prüfen.'); return; }
     if (!planDate || !planTime) { toast.error('Bitte Datum und Uhrzeit angeben.'); return; }
     setPlanSaving(true);
     try {
+      if (!(await planReview.verify())) { toast.error('Bitte die angezeigte Überschneidung prüfen.'); return; }
       await createAppointment({
         type: 'call',
         companyId: lead.id,
@@ -287,7 +295,7 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
         sendInvite: false, // interner Rückruf-Slot — Kunde bekommt KEINE Einladung
       });
       // Follow-up-Datum am Lead nachziehen (best effort, Liste/Dashboard bleiben konsistent).
-      try { await saveLead({ id: lead.id, nextFollowUpDate: planDate }); onLeadChanged?.(); } catch { /* nicht kritisch */ }
+      try { await saveLead({ id: lead.id, nextFollowUpDate: planDate }); onLeadChanged?.(); } catch { toast.warning('Rückruf angelegt, aber das Follow-up-Datum konnte nicht aktualisiert werden. Bitte den Lead prüfen.'); }
       setPlanOpen(false);
       setPlanNote('');
       await reloadAppts();
@@ -362,8 +370,6 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
   };
 
   const canModify = (a: Activity) => isAdmin || (!!currentName && a.createdByName === currentName);
-  const score = lead.designScore || lead.leadScore;
-  const st = scoreTone(score);
 
   return (
     <Shell
@@ -383,7 +389,7 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
             <Trash2 className="size-4" />
             Löschen
           </Button>
-          {status === 'Gewonnen' && (
+          {currentUser?.app_access?.admin && leadCategory({ status }) === 'won' && (
             <button
               onClick={() => window.open(buildOnboardingHandoffUrl(lead), '_blank', 'noopener')}
               title="Öffnet den vorbefüllten Tenant-Wizard im Admin-Dashboard"
@@ -400,7 +406,7 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={status} />
         {lead.priority && <PriorityPill priority={lead.priority} />}
-        {score ? <Badge tone={st.tone}>Score {score}/100</Badge> : null}
+        <Badge tone="neutral">{lead.contactPerson?.trim() ? 'Ansprechpartner erfasst' : 'Ansprechpartner fehlt'}</Badge>
         {dmReached && (
           <Badge tone="success">
             <UserCheck className="mr-1 inline size-3" />Entscheider{dmName ? `: ${dmName}` : ''}
@@ -408,11 +414,27 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
         )}
       </div>
 
-      <div className={variant === 'panel' ? 'flex flex-col gap-4' : 'grid grid-cols-1 gap-4 lg:grid-cols-[1.7fr_1fr]'}>
+          {(lead.phone || lead.email) && (
+            <div className="flex gap-2">
+              {lead.phone && (
+                <a href={`tel:${lead.phone}`} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md bg-accent-500 px-3 text-sm font-medium text-white transition-colors hover:bg-accent-600">
+                  <Phone className="size-4" />Anrufen
+                </a>
+              )}
+              {lead.email && (
+                <a href={`mailto:${lead.email}`} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md bg-elevated px-3 text-sm font-medium text-text-secondary ring-1 ring-inset ring-border-subtle transition-colors hover:text-text-primary">
+                  <Mail className="size-4" />E-Mail
+                </a>
+              )}
+            </div>
+          )}
+
+      <nav aria-label="Leadbereich" className="flex gap-1 border-b border-border-subtle">{([{ id: 'activity', label: 'Aktivitäten' }, { id: 'next', label: 'Nächste Schritte' }, { id: 'info', label: 'Kontaktdaten' }] as const).map((tab) => <button type="button" key={tab.id} aria-pressed={detailTab === tab.id} onClick={() => setDetailTab(tab.id)} className={cn('border-b-2 px-3 py-3 text-sm font-medium', detailTab === tab.id ? 'border-accent-500 text-accent-500' : 'border-transparent text-text-secondary')}>{tab.label}</button>)}</nav>
+      <div className="space-y-4">
         {/* ── Protokoll (Hauptbereich) — im Panel UNTER der Info-Karte ───── */}
-        <div className={cn('space-y-4', variant === 'panel' && 'order-2')}>
+        <div hidden={detailTab !== 'activity'} className="space-y-5">
           {/* Composer */}
-          <div className="rounded-xl border border-border-subtle bg-elevated/40 p-4">
+          <div className="rounded-md border border-border-subtle bg-surface p-4"><h3 className="mb-3 text-sm font-semibold">Aktivität erfassen</h3>
             <div className="mb-3 flex flex-wrap gap-1.5">
               {LOG_TYPES.map((t) => (
                 <button
@@ -420,7 +442,7 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
                   type="button"
                   onClick={() => setLogType(t.type)}
                   className={cn(
-                    'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition-colors',
+                    'inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium ring-1 ring-inset transition-colors',
                     logType === t.type
                       ? 'bg-accent-500 text-white ring-accent-500'
                       : 'bg-canvas text-text-secondary ring-border-subtle hover:text-text-primary',
@@ -432,6 +454,7 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
             </div>
 
             <textarea
+              aria-label="Gesprächsnotiz"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={3}
@@ -479,7 +502,8 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
           </div>
 
           {/* Timeline */}
-          <div className="space-y-3">
+          <div className="space-y-3"><h3 className="text-sm font-semibold">Verlauf</h3>
+            {activityError && <LoadError message="Aktivitäten konnten nicht geladen werden." onRetry={() => void reload()} />}
             {loading && (
               <div className="flex items-center justify-center gap-2 py-8 text-sm text-text-muted">
                 <Loader2 className="size-4 animate-spin" />Protokoll wird geladen…
@@ -489,7 +513,7 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
               const meta = ACTIVITY_META[a.type] || ACTIVITY_META.note;
               const isEditing = editingId === a.id;
               return (
-                <div key={a.id} className="rounded-xl border border-border-subtle bg-surface p-4">
+                <div key={a.id} className="border-b border-border-subtle py-4">
                   <div className="flex gap-3">
                     <div className={cn('flex size-9 shrink-0 items-center justify-center rounded-lg', meta.cls)}>{meta.icon}</div>
                     <div className="min-w-0 flex-1">
@@ -558,34 +582,21 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
                 </div>
               );
             })}
-            {!loading && activities.length === 0 && (
+            {!loading && !activityError && activities.length === 0 && (
               <EmptyState icon={<MessageSquare className="size-5" />} title="Noch kein Protokoll" description="Halte oben den ersten Anruf oder die erste Notiz fest." />
             )}
           </div>
         </div>
 
         {/* ── Info-Karte (kompakt) — im Panel ZUERST (Anrufen/Termine oben) ── */}
-        <div className={cn('space-y-3', variant === 'panel' && 'order-1')}>
-          {(lead.phone || lead.email) && (
-            <div className="flex gap-2">
-              {lead.phone && (
-                <a href={`tel:${lead.phone}`} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md bg-accent-500 px-3 text-sm font-medium text-white transition-colors hover:bg-accent-600">
-                  <Phone className="size-4" />Anrufen
-                </a>
-              )}
-              {lead.email && (
-                <a href={`mailto:${lead.email}`} className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md bg-elevated px-3 text-sm font-medium text-text-secondary ring-1 ring-inset ring-border-subtle transition-colors hover:text-text-primary">
-                  <Mail className="size-4" />E-Mail
-                </a>
-              )}
-            </div>
-          )}
+        <div hidden={detailTab === "activity"} className="space-y-4">
 
           <button
             type="button"
             onClick={() => void handleSendBrochure()}
+            hidden={detailTab !== "info"}
             disabled={brochureSending}
-            title="Broschüre manuell senden; E-Mail wird auch in Lead-Notizen und Protokoll gesucht"
+            title="Broschüre an die gespeicherte E-Mail-Adresse senden"
             className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-elevated px-3 text-sm font-medium text-text-secondary ring-1 ring-inset ring-border-subtle transition-colors hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-text-secondary"
           >
             {brochureSending
@@ -594,7 +605,8 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
           </button>
 
           {/* ── Geplante Anrufe / Rückrufe ─────────────────────────── */}
-          <div className="rounded-xl border border-border-subtle bg-elevated/40 p-3">
+          <div hidden={detailTab !== "next"} className="space-y-3 rounded-md border border-border-subtle bg-surface p-4">
+            {appointmentError && <LoadError message="Geplante Anrufe konnten nicht geladen werden." onRetry={() => void reloadAppts()} />}
             <div className="mb-2 flex items-center justify-between">
               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-text-muted">
                 <CalendarClock className="size-3.5" />Geplante Anrufe
@@ -638,14 +650,14 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
                   ))}
                 </div>
                 <div className="grid grid-cols-[1fr_auto] gap-2">
-                  <input type="date" value={planDate} onChange={(e) => setPlanDate(e.target.value)} className={cn(inputClass, 'h-9')} />
-                  <input type="time" value={planTime} onChange={(e) => setPlanTime(e.target.value)} className={cn(inputClass, 'h-9 w-[110px]')} />
+                  <input aria-label="Rückrufdatum" type="date" value={planDate} onChange={(e) => setPlanDate(e.target.value)} className={cn(inputClass, 'h-9')} />
+                  <input aria-label="Rückrufuhrzeit" type="time" value={planTime} onChange={(e) => setPlanTime(e.target.value)} className={cn(inputClass, 'h-9 w-[110px]')} />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <select value={String(planDuration)} onChange={(e) => setPlanDuration(Number(e.target.value))} className={cn(inputClass, 'h-9')}>
+                  <select aria-label="Rückrufdauer" value={String(planDuration)} onChange={(e) => setPlanDuration(Number(e.target.value))} className={cn(inputClass, 'h-9')}>
                     {[10, 15, 30, 45, 60].map((d) => <option key={d} value={d}>{d} Min.</option>)}
                   </select>
-                  <select value={planAssignee} onChange={(e) => setPlanAssignee(e.target.value)} className={cn(inputClass, 'h-9')}>
+                  <select aria-label="Rückrufzuständigkeit" value={planAssignee} onChange={(e) => setPlanAssignee(e.target.value)} className={cn(inputClass, 'h-9')}>
                     <option value="">— Zuständig —</option>
                     {admins.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
@@ -656,14 +668,16 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
                   placeholder="Worum geht's? (z. B. Rückruf wegen Angebot)"
                   className={cn(inputClass, 'h-9')}
                 />
-                <Button size="sm" className="w-full" onClick={scheduleCall} disabled={planSaving}>
+                <AppointmentConflictReview review={planReview} />
+                <p className="text-sm text-text-muted">Alle Uhrzeiten Europe/Berlin. Die Prüfung umfasst nur CRM-Termine.</p>
+                <Button size="sm" className="w-full" onClick={scheduleCall} disabled={planSaving || planReview.loading || planReview.error}>
                   {planSaving ? <Loader2 className="size-4 animate-spin" /> : <PhoneCall className="size-4" />}
                   Rückruf planen
                 </Button>
               </div>
             )}
 
-            {appts.length === 0 && !planOpen && (
+            {appts.length === 0 && !planOpen && !appointmentError && (
               <p className="py-1 text-xs text-text-muted">Kein Anruf geplant.</p>
             )}
             {appts.length > 0 && (
@@ -702,13 +716,14 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
             )}
           </div>
 
-          <div className="space-y-0.5 rounded-xl border border-border-subtle bg-elevated/40 p-3">
+          <div hidden={detailTab !== "info"} className="space-y-4">
+          <div className="space-y-1 border-b border-border-subtle pb-4">
             <InfoRow icon={<User className="size-4" />} label="Kontakt" value={lead.contactPerson || '—'} />
             {lead.phone && <InfoRow icon={<Phone className="size-4" />} label="Telefon" value={lead.phone} />}
             {lead.email && <InfoRow icon={<Mail className="size-4" />} label="E-Mail" value={lead.email} />}
             {lead.website && (
               <InfoRow icon={<Globe className="size-4" />} label="Website" value={
-                <a href={lead.website} target="_blank" rel="noopener noreferrer" className="text-accent-500 hover:text-accent-500">{lead.website.replace(/^https?:\/\//, '')}</a>
+                <a href={safeWebsiteUrl(lead.website)} target="_blank" rel="noopener noreferrer" className="text-accent-500 hover:text-accent-500">{lead.website.replace(/^https?:\/\//, '')}</a>
               } />
             )}
             {(lead.city || lead.country) && <InfoRow icon={<MapPin className="size-4" />} label="Standort" value={`${lead.city || ''}${lead.city && lead.country ? ', ' : ''}${lead.country || ''}`} />}
@@ -740,6 +755,7 @@ export function LeadDetailModal({ lead, onClose, onEdit, onDelete, onLeadChanged
               <div className="flex items-center gap-2"><Clock className="size-3.5" />Follow-up: {new Date(lead.nextFollowUpDate).toLocaleDateString('de-DE')}</div>
             )}
           </div>
+          </div>
         </div>
       </div>
     </Shell>
@@ -751,7 +767,7 @@ function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string;
     <div className="flex items-center gap-2.5 py-1.5">
       <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-accent-500/10 text-accent-500">{icon}</span>
       <span className="w-20 shrink-0 text-xs text-text-muted">{label}</span>
-      <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">{value}</span>
+      <span className="min-w-0 flex-1 break-words text-sm font-medium text-text-primary">{value}</span>
     </div>
   );
 }
