@@ -22,6 +22,7 @@ import {
 import type { User } from '../../utils/storage';
 import { cn } from '../ui/utils';
 import { WORKSPACE_HEADER, WORKSPACE_SEARCH, WORKSPACE_ACTION, WORKSPACE_AVATAR } from './workspaceShell';
+import { canUseWorkspaceSwitch } from '../../utils/workspaceAccess';
 
 /** Zurückhaltende Pille in der Kopfzeile — dieselbe Form wie im Admin. */
 
@@ -164,7 +165,7 @@ export function Topbar({ title, user, onOpenMobileSidebar, onOpenPalette, onRefr
           Stelle mit genau derselben Breite. Wer dort klickt, hat den Zeiger
           danach direkt auf diesem Knopf. Der Wert steht in beiden Anwendungen
           als WECHSEL_BREITE; wer ihn ändert, muss es dort auch tun. */}
-      {user?.app_access?.admin && <a
+      {user?.app_access?.admin && canUseWorkspaceSwitch(user) && <a
         href="https://admin.partsunion.de"
         className={cn(WORKSPACE_ACTION, WECHSEL_BREITE)}
         aria-label="Zum Admin-Panel wechseln"

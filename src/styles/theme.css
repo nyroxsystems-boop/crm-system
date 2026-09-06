@@ -502,13 +502,7 @@ html {
  * er mit dem Inhalt und der Eindruck einer Lichtquelle zerfällt.
  */
 body {
-    /* Deckung über --schein-1/-2: auf hellem Grund wirkt derselbe Wert etwa
-       doppelt so stark und die Seite bekäme einen Blaustich. */
-    background:
-        radial-gradient(1200px 620px at 12% -8%, rgb(92 141 255 / var(--schein-1)), transparent 62%),
-        radial-gradient(900px 520px at 96% 4%, rgb(61 219 151 / var(--schein-2)), transparent 60%),
-        var(--bg-canvas);
-    background-attachment: fixed;
+    background: var(--bg-canvas);
     color: var(--text-primary);
     font-size: 1rem;
     line-height: 1.5;

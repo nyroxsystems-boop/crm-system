@@ -7,7 +7,6 @@ import {
   CircleAlert,
   Phone,
   RefreshCw,
-  Target,
   UserRoundX,
   Users,
 } from 'lucide-react';
@@ -78,45 +77,35 @@ export function Dashboard({ onOpenKalender, onOpenLead, onOpenLeads }: { onOpenK
 
   if (error) return <div className={SEITEN_RAND + ' space-y-5'}><PageHeader title="Arbeitsübersicht" subtitle="Deine tägliche Vertriebsarbeit" /><LoadError message="Die Arbeitsübersicht konnte nicht vollständig geladen werden." onRetry={() => void load()} /></div>;
 
-  return <div className={SEITEN_RAND + ' space-y-6'}>
-    <section className="relative overflow-hidden rounded-2xl border border-accent-500/20 px-5 py-5 shadow-card md:px-6 md:py-6" style={{ background: 'var(--hero-verlauf)' }}>
-      <div className="relative">
-        <div className="mb-3 flex items-center gap-2 text-xs font-bold text-accent-500">
-          <span className="flex size-6 items-center justify-center rounded-lg bg-accent-500/[0.12]"><Target className="size-3.5" /></span>
-          VERTRIEBSFOKUS
-        </div>
-        <PageHeader
-          title="Arbeitsübersicht"
-          subtitle={new Intl.DateTimeFormat('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}
-          actions={<div className="flex max-w-full flex-wrap items-center gap-2">
-            <div className="flex max-w-full rounded-xl border border-border-subtle bg-surface p-1 shadow-sm">
-              {(['mine', 'team'] as const).map((value) => <button
-                key={value}
-                onClick={() => setScope(value)}
-                aria-pressed={scope === value}
-                className={'rounded-lg px-2.5 py-2 text-xs transition-colors sm:px-3 sm:text-sm ' + (scope === value ? 'bg-accent-600 font-semibold text-white shadow-sm' : 'text-text-secondary hover:bg-elevated')}
-              >{value === 'mine' ? 'Meine Arbeit' : 'Gesamtes Team'}</button>)}
-            </div>
-            <Button variant="secondary" onClick={() => void load()} disabled={busy} aria-label="Arbeitsübersicht aktualisieren">
-              <RefreshCw className={'size-4 ' + (busy ? 'animate-spin' : '')} />
-            </Button>
-          </div>}
-        />
-      </div>
+  return <div className={SEITEN_RAND + ' space-y-5'}>
+    <section className="border-b border-border pb-4 pt-1">
+      <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-text-muted">Vertriebsfokus</div>
+      <PageHeader
+        title="Arbeitsübersicht"
+        subtitle={new Intl.DateTimeFormat('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}
+        actions={<div className="flex max-w-full flex-wrap items-center gap-2">
+          <div className="flex max-w-full rounded-lg border border-border bg-canvas/60 p-0.5">
+            {(['mine', 'team'] as const).map((value) => <button
+              key={value}
+              onClick={() => setScope(value)}
+              aria-pressed={scope === value}
+              className={'rounded-md px-2.5 py-1.5 text-xs transition-colors sm:px-3 ' + (scope === value ? 'bg-surface font-semibold text-text-primary shadow-sm ring-1 ring-border' : 'text-text-secondary hover:bg-elevated')}
+            >{value === 'mine' ? 'Meine Arbeit' : 'Gesamtes Team'}</button>)}
+          </div>
+          <Button variant="secondary" onClick={() => void load()} disabled={busy} aria-label="Arbeitsübersicht aktualisieren">
+            <RefreshCw className={'size-4 ' + (busy ? 'animate-spin' : '')} />
+          </Button>
+        </div>}
+      />
     </section>
 
-    <section aria-label="Vertriebskennzahlen" className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+    <section aria-label="Vertriebskennzahlen" className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
       {metrics.map((item) => {
         const Icon = item.icon;
-        return <Card key={item.label} className={`crm-metric-card ${WORKSPACE_METRIC}`} style={{ '--metric-color': item.color } as CSSProperties}>
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="break-words text-xs font-semibold text-text-secondary sm:text-sm">{item.label}</div>
-              <div className={`mt-2 font-display font-bold leading-none tabular-nums text-text-primary ${WORKSPACE_METRIC_VALUE}`}>{busy || error ? '—' : item.value}</div>
-            </div>
-            <span className={'hidden size-7 shrink-0 items-center justify-center min-[380px]:flex rounded-lg sm:size-10 sm:rounded-xl ' + item.iconClass}><Icon className="size-[18px]" /></span>
-          </div>
-          <p className="mt-auto pt-3 text-xs font-medium text-text-muted">{item.detail}</p>
+        return <Card key={item.label} className={`crm-metric-card grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 ${WORKSPACE_METRIC}`} style={{ '--metric-color': item.color } as CSSProperties}>
+          <span className={'flex size-8 shrink-0 items-center justify-center rounded-lg ' + item.iconClass}><Icon className="size-4" /></span>
+          <span className="min-w-0"><span className="block truncate text-xs font-semibold text-text-secondary">{item.label}</span><span className="mt-0.5 block truncate text-[11px] text-text-muted">{item.detail}</span></span>
+          <span className={`text-right font-display font-bold leading-none tabular-nums text-text-primary ${WORKSPACE_METRIC_VALUE}`}>{busy || error ? '—' : item.value}</span>
         </Card>;
       })}
     </section>

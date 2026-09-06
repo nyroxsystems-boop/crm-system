@@ -151,16 +151,16 @@ describe('Aufbau der Arbeitsfläche', () => {
     });
 
     it('der Inhalt der Kopfzeile passt in ihre feste Hoehe', () => {
-        // Sie ist auf h-16 (64 px) festgelegt. py-3.5 (2 × 14) plus das
-        // hoechste Bauteil darin (h-9, 36 px) sind genau 64. Waechst der
-        // Inhalt, schneidet h-16 ihn ab — und die Arbeitsflaeche darunter
+        // Sie ist auf h-14 (56 px) festgelegt. Ohne vertikales Padding bleibt
+        // um das hoechste Bauteil (h-9, 36 px) ausreichend Luft. Waechst der
+        // Inhalt, schneidet h-14 ihn ab — und die Arbeitsflaeche darunter
         // bekaeme unbemerkt weniger Platz.
         expect(TOPBAR).toContain("className={cn(WORKSPACE_HEADER,");
         const shell = readFileSync('src/app/components/layout/workspaceShell.ts', 'utf8');
         const header = shell.match(/WORKSPACE_HEADER = '([^']+)'/)?.[1] ?? '';
-        expect(header).toMatch(/\bh-16\b/);
+        expect(header).toMatch(/\bh-14\b/);
         const t = header.match(/py-([\d.]+)/);
         const innen = t ? Number(t[1]) * 4 * 2 : 0;
-        expect(innen + 36).toBeLessThanOrEqual(64);
+        expect(innen + 36).toBeLessThanOrEqual(56);
     });
 });
